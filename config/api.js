@@ -61,6 +61,7 @@ export const ENDPOINTS = {
   // WhatsApp Integration
   WHATSAPP_STATUS: 'api/whatsapp-status',
   WHATSAPP_QR: 'api/whatsapp-qr',
+  WHATSAPP_PAIRING_CODE: 'api/whatsapp-pairing-code',
   WHATSAPP_LOGOUT: 'api/whatsapp-logout',
   SEND_INVOICE_WHATSAPP: 'api/send-invoice-whatsapp',
 };

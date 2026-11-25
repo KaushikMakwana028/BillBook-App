@@ -1,216 +1,204 @@
 /**
- * BillBook Main Header Component
- * Business branding, greeting, user profile avatar, compact theme icon switcher, and logout
+ * BillBook Universal Header Component
+ * Clean, modern navigation header with back button, screen title, right action & badge
  */
 
 import React from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  Alert,
-} from 'react-native';
-import { useAuth } from '../contexts/AuthContext';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../contexts/ThemeContext';
 import { Icon } from './Icon';
 import { FONT_FAMILY } from './fonts';
 
-export const Header = ({ onLogoutPress }) => {
-  const { user, logout } = useAuth();
-  const { colors, isDark, toggleTheme } = useTheme();
+export default function Header({
+  title,
+  subtitle,
+  showBack = false,
+  onBackPress,
+  rightIcon,
+  onRightPress,
+  badgeCount = 0,
+  // Set true ONLY if the screen does not already handle the top safe area
+  safeArea = false,
+}) {
+  const insets = useSafeAreaInsets();
+  const { colors, isDark } = useTheme();
 
-  const businessName = user?.business_name || user?.name || 'BillBook';
-  const ownerName = user?.name || 'User';
-
-  const handleLogout = () => {
-    Alert.alert(
-      'Sign Out',
-      'Are you sure you want to log out of your account?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Sign Out',
-          style: 'destructive',
-          onPress: () => {
-            if (onLogoutPress) {
-              onLogoutPress();
-            } else {
-              logout();
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  const getInitials = (str) => {
-    if (!str) return 'BB';
-    const parts = str.trim().split(' ');
-    if (parts.length >= 2) {
-      return (parts[0][0] + parts[1][0]).toUpperCase();
-    }
-    return str.slice(0, 2).toUpperCase();
-  };
+  const topPadding = safeArea ? insets.top + 6 : 8;
+  const surface = isDark ? colors.card : '#FFFFFF';
 
   return (
     <View
       style={[
         styles.container,
         {
-          backgroundColor: colors.card,
-          borderBottomColor: colors.border,
-          shadowColor: colors.shadow,
+          paddingTop: topPadding,
+          backgroundColor: surface,
+          shadowColor: isDark ? '#000000' : '#0F172A',
+          shadowOpacity: isDark ? 0.35 : 0.08,
         },
       ]}
     >
-      <View style={styles.leftArea}>
-        <View
-          style={[
-            styles.avatar,
-            {
-              backgroundColor: colors.primaryLight,
-              borderColor: colors.borderFocus,
-            },
-          ]}
-        >
-          <Text style={[styles.avatarText, { color: colors.primary }]}>
-            {getInitials(businessName)}
-          </Text>
-        </View>
-        <View style={styles.textContainer}>
-          <Text
-            style={[styles.businessName, { color: colors.text }]}
-            numberOfLines={1}
-          >
-            {businessName}
-          </Text>
-          <Text
-            style={[styles.greeting, { color: colors.textMuted }]}
-            numberOfLines={1}
-          >
-            Hi, {ownerName}
-          </Text>
-        </View>
-      </View>
-
-      <View style={styles.rightActions}>
-        {/* Compact Theme Switcher Icon */}
+      {/* Left Area (Back Button if showBack is true) */}
+      {showBack ? (
         <TouchableOpacity
+          onPress={onBackPress}
           activeOpacity={0.7}
-          onPress={toggleTheme}
           style={[
-            styles.themeToggle,
+            styles.backBtn,
             {
-              backgroundColor: isDark ? colors.cardSecondary : colors.cardSecondary,
+              backgroundColor: isDark ? '#1E293B' : '#F8FAFC',
               borderColor: colors.border,
             },
           ]}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
-          <Icon
-            name={isDark ? 'sun' : 'moon'}
-            size={18}
-            color={isDark ? '#F59E0B' : '#6366F1'}
-          />
+          <Icon name="arrow-back" size={20} color={colors.text} />
         </TouchableOpacity>
+      ) : null}
 
-        {/* Minimal Logout Button */}
+      {/* Center / Main Title & Subtitle */}
+      <View style={[styles.center, !showBack && styles.centerNoBack]}>
+        <Text
+          style={[styles.title, { color: colors.text }]}
+          numberOfLines={1}
+          ellipsizeMode="tail"
+        >
+          {title}
+        </Text>
+        {subtitle ? (
+          <View style={styles.subtitleRow}>
+            <View style={[styles.dot, { backgroundColor: colors.primary }]} />
+            <Text
+              style={[styles.subtitle, { color: colors.textMuted }]}
+              numberOfLines={1}
+            >
+              {subtitle}
+            </Text>
+          </View>
+        ) : null}
+      </View>
+
+      {/* Right Area (Action Icon or Badge) */}
+      {Boolean(rightIcon) ? (
         <TouchableOpacity
-          activeOpacity={0.7}
-          onPress={handleLogout}
+          onPress={onRightPress}
+          activeOpacity={0.85}
           style={[
-            styles.logoutButton,
+            styles.actionBtn,
             {
-              backgroundColor: isDark ? 'rgba(239, 68, 68, 0.15)' : '#FEF2F2',
-              borderColor: isDark ? 'rgba(239, 68, 68, 0.3)' : '#FECACA',
+              backgroundColor: colors.primary,
+              shadowColor: colors.primary,
             },
           ]}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
-          <Icon name="logout" size={15} color={colors.danger} />
-          <Text style={[styles.logoutText, { color: colors.danger }]}>
-            Exit
-          </Text>
+          <Icon name={rightIcon} size={20} color="#FFFFFF" />
+          {badgeCount > 0 ? (
+            <View
+              style={[
+                styles.badge,
+                {
+                  backgroundColor: isDark ? '#FFFFFF' : colors.text,
+                  borderColor: surface,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.badgeText,
+                  { color: isDark ? colors.primary : '#FFFFFF' },
+                ]}
+              >
+                {badgeCount > 99 ? '99+' : badgeCount}
+              </Text>
+            </View>
+          ) : null}
         </TouchableOpacity>
-      </View>
+      ) : null}
     </View>
   );
-};
+}
 
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 18,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 5,
-    elevation: 2,
+    paddingBottom: 16,
+    paddingHorizontal: 16,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 12,
+    elevation: 6,
+    zIndex: 10,
   },
-  leftArea: {
+  center: {
+    flex: 1,
+    paddingHorizontal: 12,
+    justifyContent: 'center',
+  },
+  centerNoBack: {
+    paddingLeft: 4,
+  },
+  title: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 22,
+    fontWeight: '800',
+    letterSpacing: -0.5,
+  },
+  subtitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    flex: 1,
-    marginRight: 10,
+    marginTop: 3,
   },
-  avatar: {
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginRight: 6,
+  },
+  subtitle: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 12.5,
+    fontWeight: '500',
+    flexShrink: 1,
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
+  actionBtn: {
     width: 42,
     height: 42,
-    borderRadius: 13,
-    borderWidth: 1.5,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
+    position: 'relative',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
   },
-  avatarText: {
-    fontFamily: FONT_FAMILY,
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  textContainer: {
-    flex: 1,
-  },
-  businessName: {
-    fontFamily: FONT_FAMILY,
-    fontSize: 16,
-    fontWeight: '800',
-    letterSpacing: -0.2,
-  },
-  greeting: {
-    fontFamily: FONT_FAMILY,
-    fontSize: 12,
-    marginTop: 1,
-    fontWeight: '500',
-  },
-  rightActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  themeToggle: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    borderWidth: 1,
+  badge: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 8,
+    paddingHorizontal: 4,
+    borderWidth: 2,
   },
-  logoutButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 10,
-    borderWidth: 1,
-    gap: 4,
-  },
-  logoutText: {
+  badgeText: {
     fontFamily: FONT_FAMILY,
-    fontSize: 12,
-    fontWeight: '700',
+    fontSize: 9,
+    fontWeight: '800',
   },
 });
-
-export default Header;

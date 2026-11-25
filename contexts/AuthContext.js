@@ -4,27 +4,9 @@
  */
 
 import React, { createContext, useState, useEffect, useContext, useCallback } from 'react';
+import storage from '../utils/storage';
 import apiClient from '../services/apiClient';
 import authService from '../services/authService';
-
-// In-memory fallback if AsyncStorage is not yet linked/installed
-const memoryStore = {};
-let storageModule = null;
-
-try {
-  storageModule = require('@react-native-async-storage/async-storage').default;
-} catch (e) {
-  // Use memory store fallback
-  storageModule = {
-    getItem: async (key) => memoryStore[key] || null,
-    setItem: async (key, val) => {
-      memoryStore[key] = val;
-    },
-    removeItem: async (key) => {
-      delete memoryStore[key];
-    },
-  };
-}
 
 export const AuthContext = createContext({
   user: null,
@@ -49,43 +31,80 @@ export const AuthProvider = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Restore session from storage on app launch
+  // Restore session permanently on app launch
   useEffect(() => {
+    let isMounted = true;
+
     const restoreSession = async () => {
       try {
-        const storedToken = await storageModule.getItem(TOKEN_KEY);
-        const storedUser = await storageModule.getItem(USER_KEY);
+        let storedToken = await storage.getItem(TOKEN_KEY);
+        let storedUser = await storage.getItem(USER_KEY);
 
-        if (storedToken && storedUser) {
-          const parsedUser = JSON.parse(storedUser);
+        if (storedToken) {
+          if (!isMounted) return;
           setToken(storedToken);
-          setUser(parsedUser);
-          setIsAuthenticated(true);
           apiClient.setToken(storedToken);
+          setIsAuthenticated(true);
+
+          if (storedUser) {
+            try {
+              const parsedUser = typeof storedUser === 'string' ? JSON.parse(storedUser) : storedUser;
+              setUser(parsedUser);
+            } catch {
+              // fallback
+            }
+          }
 
           // Fetch fresh profile in background
           authService
             .getMyProfile()
             .then((res) => {
-              if (res?.status && res?.data) {
+              if (res?.status && res?.data && isMounted) {
                 setUser(res.data);
-                storageModule.setItem(USER_KEY, JSON.stringify(res.data));
+                storage.setItem(USER_KEY, JSON.stringify(res.data)).catch(() => {});
               }
             })
             .catch(() => {});
+        } else {
+          // Fallback: Check if active cookie session exists on server
+          try {
+            const profileRes = await authService.getMyProfile();
+            if (profileRes?.status && profileRes?.data && isMounted) {
+              const freshUser = profileRes.data;
+              const recoveredToken = freshUser.token || profileRes.token;
+              if (recoveredToken) {
+                setToken(recoveredToken);
+                apiClient.setToken(recoveredToken);
+                await storage.setItem(TOKEN_KEY, recoveredToken);
+              }
+              setUser(freshUser);
+              setIsAuthenticated(true);
+              await storage.setItem(USER_KEY, JSON.stringify(freshUser));
+            }
+          } catch {
+            // Not authenticated on server
+          }
         }
       } catch (err) {
-        console.warn('Session restoration failed:', err);
+        // Safe silent catch
       } finally {
-        setIsLoading(false);
+        if (isMounted) {
+          setTimeout(() => {
+            setIsLoading(false);
+          }, 1000);
+        }
       }
     };
 
     restoreSession();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   /**
-   * Save session to state and storage
+   * Save session permanently to storage and memory state
    */
   const saveSession = useCallback(async (newToken, newUser) => {
     try {
@@ -94,10 +113,14 @@ export const AuthProvider = ({ children }) => {
       setIsAuthenticated(true);
       apiClient.setToken(newToken);
 
-      await storageModule.setItem(TOKEN_KEY, newToken);
-      await storageModule.setItem(USER_KEY, JSON.stringify(newUser));
+      if (newToken) {
+        await storage.setItem(TOKEN_KEY, String(newToken));
+      }
+      if (newUser) {
+        await storage.setItem(USER_KEY, JSON.stringify(newUser));
+      }
     } catch (err) {
-      console.warn('Error saving session:', err);
+      // Safe fallback
     }
   }, []);
 
@@ -168,8 +191,8 @@ export const AuthProvider = ({ children }) => {
       setUser(null);
       setIsAuthenticated(false);
       try {
-        await storageModule.removeItem(TOKEN_KEY);
-        await storageModule.removeItem(USER_KEY);
+        await storage.removeItem(TOKEN_KEY);
+        await storage.removeItem(USER_KEY);
       } catch (e) {
         // Ignore storage errors
       }
@@ -182,7 +205,7 @@ export const AuthProvider = ({ children }) => {
   const updateUser = useCallback(async (updatedUser) => {
     setUser((prev) => {
       const merged = { ...prev, ...updatedUser };
-      storageModule.setItem(USER_KEY, JSON.stringify(merged));
+      storage.setItem(USER_KEY, JSON.stringify(merged)).catch(() => {});
       return merged;
     });
   }, []);

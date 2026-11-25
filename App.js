@@ -8,6 +8,7 @@ import { StatusBar } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ThemeProvider, useTheme } from './contexts/ThemeContext';
 import { AuthProvider } from './contexts/AuthContext';
+import { AlertProvider } from './contexts/AlertContext';
 import { AppNavigator } from './navigation/AppNavigator';
 
 const MainApp = () => {
@@ -19,9 +20,11 @@ const MainApp = () => {
         barStyle={isDark ? 'light-content' : 'dark-content'}
         backgroundColor={colors.background}
       />
-      <AuthProvider>
-        <AppNavigator />
-      </AuthProvider>
+      <AlertProvider>
+        <AuthProvider>
+          <AppNavigator />
+        </AuthProvider>
+      </AlertProvider>
     </>
   );
 };
