@@ -18,12 +18,11 @@ import {
   Platform,
   Modal,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAlert } from '../contexts/AlertContext';
 import productService from '../services/productService';
 import categoryService from '../services/categoryService';
-import { Header, Icon } from '../components';
+import { Header, Icon, SafeAreaView } from '../components';
 import { FONT_FAMILY } from '../components/fonts';
 import { resolveProductImageUrl } from '../utils/imageUrl';
 

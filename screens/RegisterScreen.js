@@ -18,10 +18,10 @@ import {
   Linking,
   Alert,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAlert } from '../contexts/AlertContext';
+import { SafeAreaView } from '../components';
 import { Icon } from '../components/Icon';
 import { FONT_FAMILY } from '../components/fonts';
 

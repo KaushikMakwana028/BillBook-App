@@ -1254,6 +1254,144 @@ export const Icon = ({ name, size = 20, color = '#FFFFFF', style }) => {
         </View>
       );
 
+    case 'printer':
+    case 'print':
+      return (
+        <View style={[{ width: size, height: size }, styles.center, style]}>
+          {/* Paper top */}
+          <View
+            style={{
+              width: size * 0.54,
+              height: size * 0.22,
+              borderTopLeftRadius: 2,
+              borderTopRightRadius: 2,
+              borderWidth: 1.8,
+              borderBottomWidth: 0,
+              borderColor: color,
+            }}
+          />
+          {/* Printer body */}
+          <View
+            style={{
+              width: size * 0.84,
+              height: size * 0.42,
+              borderRadius: 3.5,
+              borderWidth: 1.8,
+              borderColor: color,
+              alignItems: 'flex-end',
+              justifyContent: 'center',
+              paddingRight: 3,
+            }}
+          >
+            <View
+              style={{
+                width: 3,
+                height: 3,
+                borderRadius: 1.5,
+                backgroundColor: color,
+              }}
+            />
+          </View>
+          {/* Paper bottom tray */}
+          <View
+            style={{
+              width: size * 0.54,
+              height: size * 0.24,
+              borderBottomLeftRadius: 2,
+              borderBottomRightRadius: 2,
+              borderWidth: 1.8,
+              borderTopWidth: 0,
+              borderColor: color,
+              marginTop: -2,
+              backgroundColor: 'transparent',
+            }}
+          />
+        </View>
+      );
+
+    case 'palette':
+    case 'color':
+      return (
+        <View style={[{ width: size, height: size }, styles.center, style]}>
+          <View
+            style={{
+              width: size * 0.82,
+              height: size * 0.82,
+              borderRadius: (size * 0.82) / 2,
+              borderWidth: 1.8,
+              borderColor: color,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <View style={{ flexDirection: 'row', gap: 2.5, marginBottom: 2 }}>
+              <View style={{ width: 3, height: 3, borderRadius: 1.5, backgroundColor: color }} />
+              <View style={{ width: 3, height: 3, borderRadius: 1.5, backgroundColor: color }} />
+            </View>
+            <View style={{ flexDirection: 'row', gap: 2.5 }}>
+              <View style={{ width: 3, height: 3, borderRadius: 1.5, backgroundColor: color }} />
+              <View style={{ width: 3.5, height: 3.5, borderRadius: 2, borderWidth: 1, borderColor: color }} />
+            </View>
+          </View>
+        </View>
+      );
+
+    case 'share':
+      return (
+        <View style={[{ width: size, height: size }, styles.center, style]}>
+          <View
+            style={{
+              width: size * 0.24,
+              height: size * 0.24,
+              borderRadius: (size * 0.24) / 2,
+              backgroundColor: color,
+              position: 'absolute',
+              top: size * 0.12,
+              right: size * 0.16,
+            }}
+          />
+          <View
+            style={{
+              width: size * 0.24,
+              height: size * 0.24,
+              borderRadius: (size * 0.24) / 2,
+              backgroundColor: color,
+              position: 'absolute',
+              left: size * 0.14,
+            }}
+          />
+          <View
+            style={{
+              width: size * 0.24,
+              height: size * 0.24,
+              borderRadius: (size * 0.24) / 2,
+              backgroundColor: color,
+              position: 'absolute',
+              bottom: size * 0.12,
+              right: size * 0.16,
+            }}
+          />
+          <View
+            style={{
+              width: size * 0.44,
+              height: 1.8,
+              backgroundColor: color,
+              transform: [{ rotate: '-28deg' }],
+              marginBottom: size * 0.14,
+            }}
+          />
+          <View
+            style={{
+              width: size * 0.44,
+              height: 1.8,
+              backgroundColor: color,
+              transform: [{ rotate: '28deg' }],
+              marginTop: size * 0.04,
+            }}
+          />
+        </View>
+      );
+
     case 'layers':
       return (
         <View style={[{ width: size, height: size }, styles.center, style]}>

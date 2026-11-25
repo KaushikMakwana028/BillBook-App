@@ -15,18 +15,20 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Share,
+  Modal,
+  Linking,
+  Switch,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAlert } from '../contexts/AlertContext';
 import productService from '../services/productService';
-import { Header, Icon } from '../components';
+import { Header, Icon, BarcodeView, SafeAreaView } from '../components';
 import { FONT_FAMILY } from '../components/fonts';
 import { resolveProductImageUrl } from '../utils/imageUrl';
 
 export function ProductDetailScreen({ navigation, route, params: propParams, onGoBack, onNavigate }) {
   const { colors } = useTheme();
-  const { showConfirm, showSuccess, showError } = useAlert();
+  const { showAlert, showConfirm, showSuccess, showError } = useAlert();
 
   const initialProduct = route?.params?.product || propParams?.product || {};
   const productId = initialProduct.id || route?.params?.productId || propParams?.productId;
@@ -35,6 +37,14 @@ export function ProductDetailScreen({ navigation, route, params: propParams, onG
   const [loading, setLoading] = useState(!initialProduct.name && !!productId);
   const [deleting, setDeleting] = useState(false);
   const [imgError, setImgError] = useState(false);
+
+  // Print Barcode Modal State
+  const [barcodeModalVisible, setBarcodeModalVisible] = useState(false);
+  const [barcodeCopies, setBarcodeCopies] = useState(1);
+  const [showLabelName, setShowLabelName] = useState(true);
+  const [showLabelPrice, setShowLabelPrice] = useState(true);
+  const [compactLabel, setCompactLabel] = useState(false);
+  const [printingSheet, setPrintingSheet] = useState(false);
 
   // Fetch full details if needed
   useEffect(() => {
@@ -133,6 +143,72 @@ export function ProductDetailScreen({ navigation, route, params: propParams, onG
 
   const rawImg = product.image || product.product_image || product.image_url || product.photo || product.img;
   const resolvedImg = resolveProductImageUrl(rawImg);
+
+  const effectiveBarcode = String(
+    product.barcode || product.sku || (product.id ? `BB${String(product.id).padStart(6, '0')}` : '')
+  ).trim();
+  const hasExplicitBarcode = Boolean(product.barcode && String(product.barcode).trim());
+
+  const handleOpenPrintBarcode = () => {
+    if (!effectiveBarcode) {
+      showError({
+        title: 'No Barcode Available',
+        message: 'Please edit this product and assign or generate a barcode first.',
+      });
+      return;
+    }
+    setBarcodeModalVisible(true);
+  };
+
+  const handlePrintBarcodeSheet = async () => {
+    if (!product.id) {
+      showAlert({
+        title: 'Barcode Label Ready',
+        message: 'Use the Share Label option to send or print this barcode label.',
+        type: 'info',
+      });
+      return;
+    }
+
+    setPrintingSheet(true);
+    try {
+      const res = await productService.getBarcodeSheet(`${product.id}:${barcodeCopies}`);
+      const sheetUrl =
+        res?.data?.url ||
+        res?.data?.pdf_url ||
+        res?.data?.print_url ||
+        res?.url ||
+        res?.print_url;
+
+      if (sheetUrl && typeof sheetUrl === 'string') {
+        await Linking.openURL(sheetUrl);
+      } else {
+        showSuccess({
+          title: 'Print Sheet Prepared',
+          message: `${barcodeCopies} ${barcodeCopies === 1 ? 'label' : 'labels'} for "${product.name}" (${effectiveBarcode}) ready in the sheet preview above. Tap "Share Barcode" to send or print from your device.`,
+        });
+      }
+    } catch {
+      showAlert({
+        title: 'Offline Label Preview Ready',
+        message: `Your ${barcodeCopies}-copy barcode sheet for "${product.name}" (${effectiveBarcode}) is rendered above. Use "Share Barcode" to send or print via a connected printer app.`,
+        type: 'info',
+      });
+    } finally {
+      setPrintingSheet(false);
+    }
+  };
+
+  const handleShareBarcode = async () => {
+    try {
+      await Share.share({
+        title: `${product.name || 'Product'} Barcode`,
+        message: `Product: ${product.name || 'Item'}\nPrice: ${formatCurrency(sellingPrice)}\nBarcode / SKU: ${effectiveBarcode}\nCopies: ${barcodeCopies}`,
+      });
+    } catch {
+      // ignore user cancel
+    }
+  };
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={['top', 'left', 'right']}>
@@ -248,15 +324,48 @@ export function ProductDetailScreen({ navigation, route, params: propParams, onG
 
             <Text style={[styles.heroProductName, { color: colors.text }]}>{product.name}</Text>
 
-            {/* Barcode Tag */}
-            {product.barcode ? (
-              <View style={[styles.barcodeBox, { backgroundColor: colors.cardSecondary, borderColor: colors.border }]}>
-                <Icon name="barcode" size={18} color={colors.textSecondary} style={{ marginRight: 8 }} />
-                <Text style={[styles.barcodeText, { color: colors.text }]}>
-                  SKU / Barcode: {product.barcode}
-                </Text>
+            {/* Barcode Visual & Quick Print Option */}
+            <View style={[styles.barcodeCard, { backgroundColor: colors.cardSecondary, borderColor: colors.border }]}>
+              <View style={styles.barcodeHeaderRow}>
+                <View style={styles.barcodeTitleRow}>
+                  <Icon name="barcode" size={18} color={colors.navy} style={{ marginRight: 7 }} />
+                  <Text style={[styles.barcodeSectionTitle, { color: colors.text }]}>
+                    {hasExplicitBarcode ? 'Product Barcode' : 'Generated Item Code'}
+                  </Text>
+                </View>
+
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={handleOpenPrintBarcode}
+                  style={[styles.printInlineBtn, { backgroundColor: colors.navy }]}
+                >
+                  <Icon name="printer" size={14} color="#FFFFFF" style={{ marginRight: 5 }} />
+                  <Text style={styles.printInlineBtnText}>Print Barcode</Text>
+                </TouchableOpacity>
               </View>
-            ) : null}
+
+              {effectiveBarcode ? (
+                <View style={styles.barcodeGraphicWrap}>
+                  <BarcodeView
+                    value={effectiveBarcode}
+                    height={52}
+                    barWidth={1.7}
+                    showText={false}
+                    barColor="#0A2540"
+                    backgroundColor="#FFFFFF"
+                  />
+                  {!hasExplicitBarcode ? (
+                    <Text style={[styles.barcodeHintText, { color: colors.textMuted }]}>
+                      Using catalog ID fallback. Tap Edit to assign a custom barcode.
+                    </Text>
+                  ) : null}
+                </View>
+              ) : (
+                <Text style={[styles.barcodeHintText, { color: colors.textMuted }]}>
+                  No barcode assigned yet. Tap Edit to generate one.
+                </Text>
+              )}
+            </View>
           </View>
 
           {/* ── PRICING & MARGIN KPI CARD ── */}
@@ -353,11 +462,20 @@ export function ProductDetailScreen({ navigation, route, params: propParams, onG
           <View style={styles.actionDock}>
             <TouchableOpacity
               activeOpacity={0.85}
+              onPress={handleOpenPrintBarcode}
+              style={[styles.printDockBtn, { backgroundColor: colors.navy }]}
+            >
+              <Icon name="printer" size={17} color="#FFFFFF" style={{ marginRight: 6 }} />
+              <Text style={styles.editBtnText}>Print</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              activeOpacity={0.85}
               onPress={handleEdit}
               style={[styles.editBtn, { backgroundColor: colors.primary }]}
             >
-              <Icon name="edit" size={17} color="#FFFFFF" style={{ marginRight: 8 }} />
-              <Text style={styles.editBtnText}>Edit Product</Text>
+              <Icon name="edit" size={17} color="#FFFFFF" style={{ marginRight: 6 }} />
+              <Text style={styles.editBtnText}>Edit</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -370,7 +488,7 @@ export function ProductDetailScreen({ navigation, route, params: propParams, onG
                 <ActivityIndicator size="small" color={colors.danger} />
               ) : (
                 <>
-                  <Icon name="trash" size={17} color={colors.danger} style={{ marginRight: 8 }} />
+                  <Icon name="trash" size={17} color={colors.danger} style={{ marginRight: 6 }} />
                   <Text style={[styles.deleteBtnText, { color: colors.danger }]}>Delete</Text>
                 </>
               )}
@@ -378,6 +496,195 @@ export function ProductDetailScreen({ navigation, route, params: propParams, onG
           </View>
         </ScrollView>
       )}
+
+      {/* ── PRINT BARCODE MODAL ── */}
+      <Modal
+        visible={barcodeModalVisible}
+        transparent={false}
+        animationType="slide"
+        onRequestClose={() => setBarcodeModalVisible(false)}
+      >
+        <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={['top', 'left', 'right', 'bottom']}>
+          <Header
+            title="Print Barcode"
+            subtitle={product.name || 'Label Preview'}
+            showBack={true}
+            onBackPress={() => setBarcodeModalVisible(false)}
+            rightIcon="share"
+            onRightPress={handleShareBarcode}
+          />
+
+          <ScrollView contentContainerStyle={styles.printModalScroll} showsVerticalScrollIndicator={false}>
+            {/* Label Controls Card */}
+            <View style={[styles.specCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>Label Print Options</Text>
+
+              {/* Copies Stepper + Quick Chips */}
+              <View style={styles.copiesRow}>
+                <View>
+                  <Text style={[styles.specLabel, { color: colors.text, fontWeight: '700' }]}>Number of Copies</Text>
+                  <Text style={[styles.barcodeHintText, { color: colors.textMuted, marginTop: 2 }]}>
+                    Sticker labels in print sheet
+                  </Text>
+                </View>
+
+                <View style={styles.stepperBox}>
+                  <TouchableOpacity
+                    style={[styles.stepperBtn, { backgroundColor: colors.cardSecondary, borderColor: colors.border }]}
+                    onPress={() => setBarcodeCopies((c) => Math.max(1, c - 1))}
+                  >
+                    <Text style={[styles.stepperBtnText, { color: colors.text }]}>−</Text>
+                  </TouchableOpacity>
+                  <Text style={[styles.stepperVal, { color: colors.text }]}>{barcodeCopies}</Text>
+                  <TouchableOpacity
+                    style={[styles.stepperBtn, { backgroundColor: colors.cardSecondary, borderColor: colors.border }]}
+                    onPress={() => setBarcodeCopies((c) => Math.min(24, c + 1))}
+                  >
+                    <Text style={[styles.stepperBtnText, { color: colors.text }]}>+</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <View style={styles.presetCopiesRow}>
+                {[1, 2, 4, 6, 8, 12].map((qty) => {
+                  const active = barcodeCopies === qty;
+                  return (
+                    <TouchableOpacity
+                      key={qty}
+                      onPress={() => setBarcodeCopies(qty)}
+                      style={[
+                        styles.presetCopyChip,
+                        {
+                          backgroundColor: active ? colors.primary : colors.cardSecondary,
+                          borderColor: active ? colors.primary : colors.border,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.presetCopyText,
+                          { color: active ? '#FFFFFF' : colors.textSecondary },
+                        ]}
+                      >
+                        {qty}x
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <View style={[styles.divider, { backgroundColor: colors.border, marginVertical: 12 }]} />
+
+              <View style={styles.toggleRow}>
+                <Text style={[styles.specLabel, { color: colors.text }]}>Show Product Name</Text>
+                <Switch
+                  value={showLabelName}
+                  onValueChange={setShowLabelName}
+                  trackColor={{ false: colors.border, true: colors.primary }}
+                  thumbColor="#FFFFFF"
+                />
+              </View>
+
+              <View style={styles.toggleRow}>
+                <Text style={[styles.specLabel, { color: colors.text }]}>Show Selling Price</Text>
+                <Switch
+                  value={showLabelPrice}
+                  onValueChange={setShowLabelPrice}
+                  trackColor={{ false: colors.border, true: colors.primary }}
+                  thumbColor="#FFFFFF"
+                />
+              </View>
+
+              <View style={styles.toggleRow}>
+                <Text style={[styles.specLabel, { color: colors.text }]}>Compact Thermal Label</Text>
+                <Switch
+                  value={compactLabel}
+                  onValueChange={setCompactLabel}
+                  trackColor={{ false: colors.border, true: colors.primary }}
+                  thumbColor="#FFFFFF"
+                />
+              </View>
+            </View>
+
+            {/* Live Printable Sheet Preview */}
+            <View style={[styles.specCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <View style={styles.sheetPreviewHeader}>
+                <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>
+                  Printable Sheet Preview ({barcodeCopies} {barcodeCopies === 1 ? 'Label' : 'Labels'})
+                </Text>
+                <View style={[styles.readyPill, { backgroundColor: '#ECFDF5' }]}>
+                  <Text style={styles.readyPillText}>Code 128</Text>
+                </View>
+              </View>
+
+              <View style={styles.paperSheet}>
+                <View style={styles.labelsGrid}>
+                  {Array.from({ length: barcodeCopies }).map((_, index) => (
+                    <View
+                      key={index}
+                      style={[
+                        styles.stickerLabel,
+                        compactLabel && styles.stickerLabelCompact,
+                      ]}
+                    >
+                      {showLabelName ? (
+                        <Text style={styles.stickerName} numberOfLines={1}>
+                          {product.name || 'Product Item'}
+                        </Text>
+                      ) : null}
+
+                      <BarcodeView
+                        value={effectiveBarcode}
+                        height={compactLabel ? 34 : 46}
+                        barWidth={compactLabel ? 1.15 : 1.4}
+                        showText={false}
+                        barColor="#0F172A"
+                        backgroundColor="#FFFFFF"
+                        style={{ paddingVertical: 4, paddingHorizontal: 4 }}
+                      />
+
+                      {showLabelPrice ? (
+                        <View style={styles.stickerFooterRow}>
+                          <Text style={styles.stickerPriceLabel}>MRP / PRICE</Text>
+                          <Text style={styles.stickerPriceVal}>{formatCurrency(sellingPrice)}</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                  ))}
+                </View>
+              </View>
+            </View>
+
+            {/* Print Actions */}
+            <View style={styles.printActionsRow}>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={handlePrintBarcodeSheet}
+                disabled={printingSheet}
+                style={[styles.printPrimaryBtn, { backgroundColor: colors.primary }]}
+              >
+                {printingSheet ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <>
+                    <Icon name="printer" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
+                    <Text style={styles.printPrimaryBtnText}>Print Barcode Sheet</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={handleShareBarcode}
+                style={[styles.shareSecondaryBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
+              >
+                <Icon name="share" size={17} color={colors.navy} style={{ marginRight: 6 }} />
+                <Text style={[styles.shareSecondaryBtnText, { color: colors.navy }]}>Share</Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -506,6 +813,53 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
   },
+  barcodeCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 12,
+    marginTop: 4,
+  },
+  barcodeHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  barcodeTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  barcodeSectionTitle: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  printInlineBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+    borderRadius: 10,
+  },
+  printInlineBtnText: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 11.5,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  barcodeGraphicWrap: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+  },
+  barcodeHintText: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 11,
+    marginTop: 4,
+    textAlign: 'center',
+  },
   kpiCard: {
     borderRadius: 20,
     borderWidth: 1,
@@ -595,11 +949,20 @@ const styles = StyleSheet.create({
   },
   actionDock: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 10,
     marginTop: 8,
   },
+  printDockBtn: {
+    flex: 1,
+    height: 50,
+    borderRadius: 15,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 3,
+  },
   editBtn: {
-    flex: 1.4,
+    flex: 1,
     height: 50,
     borderRadius: 15,
     flexDirection: 'row',
@@ -627,6 +990,178 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   deleteBtnText: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  printModalScroll: {
+    padding: 16,
+    paddingBottom: 40,
+  },
+  copiesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  stepperBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  stepperBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepperBtnText: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 18,
+    fontWeight: '700',
+    lineHeight: 20,
+  },
+  stepperVal: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 16,
+    fontWeight: '800',
+    minWidth: 24,
+    textAlign: 'center',
+  },
+  presetCopiesRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  presetCopyChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  presetCopyText: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+  },
+  sheetPreviewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  readyPill: {
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  readyPillText: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#059669',
+  },
+  paperSheet: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: '#CBD5E1',
+    padding: 12,
+  },
+  labelsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  stickerLabel: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: '#94A3B8',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    minWidth: 148,
+    maxWidth: '100%',
+  },
+  stickerLabelCompact: {
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    minWidth: 126,
+  },
+  stickerName: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#0F172A',
+    marginBottom: 2,
+    maxWidth: 180,
+    textAlign: 'center',
+  },
+  stickerFooterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginTop: 4,
+    paddingTop: 4,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#E2E8F0',
+    width: '100%',
+  },
+  stickerPriceLabel: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 8.5,
+    fontWeight: '700',
+    color: '#64748B',
+  },
+  stickerPriceVal: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#0A2540',
+  },
+  printActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+  printPrimaryBtn: {
+    flex: 2,
+    height: 50,
+    borderRadius: 15,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 3,
+  },
+  printPrimaryBtnText: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  shareSecondaryBtn: {
+    flex: 1,
+    height: 50,
+    borderRadius: 15,
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  shareSecondaryBtnText: {
     fontFamily: FONT_FAMILY,
     fontSize: 14,
     fontWeight: '700',

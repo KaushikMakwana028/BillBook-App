@@ -18,11 +18,10 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAlert } from '../contexts/AlertContext';
 import partyService from '../services/partyService';
-import { Header, BottomBar, SkeletonLoader, Icon, Pagination } from '../components';
+import { Header, BottomBar, SkeletonLoader, Icon, Pagination, SafeAreaView } from '../components';
 import { FONT_FAMILY } from '../components/fonts';
 
 const TYPE_FILTERS = [

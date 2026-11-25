@@ -18,12 +18,11 @@ import {
   Platform,
   Modal,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAlert } from '../contexts/AlertContext';
 import productService from '../services/productService';
 import categoryService from '../services/categoryService';
-import { Header, Icon } from '../components';
+import { Header, Icon, SafeAreaView } from '../components';
 import { FONT_FAMILY } from '../components/fonts';
 import { resolveProductImageUrl } from '../utils/imageUrl';
 
@@ -207,21 +206,16 @@ export function EditProductScreen({ navigation, route, params: propParams, onGoB
       const res = await productService.updateProduct(payload);
 
       if (res?.status) {
+        if (onNavigate) {
+          onNavigate('Products', { refresh: Date.now() });
+        } else if (navigation?.navigate) {
+          navigation.navigate('Products', { refresh: Date.now() });
+        } else {
+          handleBack();
+        }
         showSuccess({
           title: 'Product Updated 🎉',
           message: `"${name.trim()}" has been updated successfully.`,
-          onConfirm: () => {
-            if (onNavigate) {
-              onNavigate('ProductDetail', {
-                product: {
-                  ...passedProduct,
-                  ...payload,
-                },
-              });
-            } else {
-              handleBack();
-            }
-          },
         });
       } else {
         showError({

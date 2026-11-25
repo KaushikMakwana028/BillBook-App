@@ -65,7 +65,7 @@ export const AppNavigator = () => {
       setActiveTab('Products');
       setCurrentScreen('');
       setNavHistory([]);
-      setScreenParams({});
+      setScreenParams(params || {});
     } else if (normal === 'parties' || normal === 'customers') {
       setActiveTab('Parties');
       setCurrentScreen('');

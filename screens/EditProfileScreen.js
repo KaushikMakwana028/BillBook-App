@@ -18,12 +18,11 @@ import {
   Platform,
   Image,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAlert } from '../contexts/AlertContext';
 import profileService from '../services/profileService';
-import { Header, Icon } from '../components';
+import { Header, Icon, SafeAreaView } from '../components';
 import { FONT_FAMILY } from '../components/fonts';
 import { resolveProfileImageUrl } from '../utils/imageUrl';
 

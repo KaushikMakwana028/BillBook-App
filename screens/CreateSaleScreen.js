@@ -18,14 +18,13 @@ import {
   KeyboardAvoidingView,
   Image,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import storage from '../utils/storage';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAlert } from '../contexts/AlertContext';
 import salesService from '../services/salesService';
 import productService from '../services/productService';
 import partyService from '../services/partyService';
-import { Header, Icon } from '../components';
+import { Header, Icon, SafeAreaView } from '../components';
 import { FONT_FAMILY } from '../components/fonts';
 import { resolveProductImageUrl } from '../utils/imageUrl';
 

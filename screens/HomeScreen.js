@@ -22,12 +22,11 @@ import {
   Alert,
   Dimensions,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAlert } from '../contexts/AlertContext';
 import homeService from '../services/homeService';
-import { BottomBar, SkeletonLoader, Icon } from '../components';
+import { BottomBar, SkeletonLoader, Icon, SafeAreaView } from '../components';
 import { FONT_FAMILY } from '../components/fonts';
 import { resolveProfileImageUrl } from '../utils/imageUrl';
 

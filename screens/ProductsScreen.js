@@ -14,12 +14,11 @@ import {
   TouchableOpacity,
   TextInput,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAlert } from '../contexts/AlertContext';
 import productService from '../services/productService';
 import categoryService from '../services/categoryService';
-import { Header, BottomBar, SkeletonLoader, Icon, Pagination } from '../components';
+import { Header, BottomBar, SkeletonLoader, Icon, Pagination, SafeAreaView } from '../components';
 import { FONT_FAMILY } from '../components/fonts';
 import { resolveProductImageUrl } from '../utils/imageUrl';
 
@@ -94,8 +93,9 @@ const STOCK_FILTERS = [
   { id: 'in_stock', label: 'In Stock' },
 ];
 
-export function ProductsScreen({ navigation, onNavigate }) {
+export function ProductsScreen({ navigation, route, params: propParams, onNavigate }) {
   const { colors } = useTheme();
+  const refreshTrigger = propParams?.refresh || route?.params?.refresh;
 
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -113,7 +113,7 @@ export function ProductsScreen({ navigation, onNavigate }) {
   const limit = 10;
 
   const fetchProducts = useCallback(
-    async (page = 1, isRefresh = false) => {
+    async (page = 1, isRefresh = false, bypassCache = false) => {
       if (isRefresh) {
         setRefreshing(true);
       } else {
@@ -126,7 +126,9 @@ export function ProductsScreen({ navigation, onNavigate }) {
         if (selectedCategory !== 'all') params.category_id = selectedCategory;
         if (stockFilter !== 'all') params.stock_filter = stockFilter;
 
-        const res = await productService.getProducts(params, { useCache: !isRefresh });
+        const res = await productService.getProducts(params, {
+          useCache: !(isRefresh || bypassCache),
+        });
         if (res?.status && res?.data) {
           const list = Array.isArray(res.data) ? res.data : res.data.products || [];
           setProducts(list);
@@ -167,8 +169,8 @@ export function ProductsScreen({ navigation, onNavigate }) {
   }, []);
 
   useEffect(() => {
-    fetchProducts(1);
-  }, [fetchProducts]);
+    fetchProducts(1, false, Boolean(refreshTrigger));
+  }, [fetchProducts, refreshTrigger]);
 
   const onRefresh = () => {
     fetchProducts(currentPage, true);

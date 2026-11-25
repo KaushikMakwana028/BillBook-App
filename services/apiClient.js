@@ -11,7 +11,7 @@ class ApiClient {
   constructor() {
     this.token = null;
     this.cache = new Map();
-    this.defaultTimeout = 15000; // 15 seconds max timeout
+    this.defaultTimeout = 30000; // 30 seconds max timeout for media/invoice processing
   }
 
   /**

@@ -18,11 +18,10 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAlert } from '../contexts/AlertContext';
 import categoryService from '../services/categoryService';
-import { Header, SkeletonLoader, Icon } from '../components';
+import { Header, SkeletonLoader, Icon, SafeAreaView } from '../components';
 import { FONT_FAMILY } from '../components/fonts';
 
 export function CategoriesScreen({ navigation, onGoBack }) {

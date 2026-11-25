@@ -8,7 +8,7 @@
  * - Delete Invoice (with confirmation)
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -19,88 +19,25 @@ import {
   Modal,
   Image,
   Linking,
-  Share,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAlert } from '../contexts/AlertContext';
 import salesService from '../services/salesService';
 import whatsappService from '../services/whatsappService';
-import invoiceService from '../services/invoiceService';
 import { resolveProductImageUrl, resolveSignatureUrl } from '../utils/imageUrl';
-import { Header, Icon } from '../components';
+import { Header, Icon, InvoiceTemplateRenderer, SafeAreaView } from '../components';
 import { FONT_FAMILY } from '../components/fonts';
-
-// Indian currency words converter
-const numberToWordsIndian = (num) => {
-  num = Math.round(Number(num) || 0);
-  if (num === 0) return 'Zero Rupees only';
-  const ones = [
-    '',
-    'One',
-    'Two',
-    'Three',
-    'Four',
-    'Five',
-    'Six',
-    'Seven',
-    'Eight',
-    'Nine',
-    'Ten',
-    'Eleven',
-    'Twelve',
-    'Thirteen',
-    'Fourteen',
-    'Fifteen',
-    'Sixteen',
-    'Seventeen',
-    'Eighteen',
-    'Nineteen',
-  ];
-  const tens = [
-    '',
-    '',
-    'Twenty',
-    'Thirty',
-    'Forty',
-    'Fifty',
-    'Sixty',
-    'Seventy',
-    'Eighty',
-    'Ninety',
-  ];
-
-  const convert = (n) => {
-    let str = '';
-    if (n >= 10000000) {
-      str += convert(Math.floor(n / 10000000)) + ' Crore ';
-      n %= 10000000;
-    }
-    if (n >= 100000) {
-      str += convert(Math.floor(n / 100000)) + ' Lakh ';
-      n %= 100000;
-    }
-    if (n >= 1000) {
-      str += convert(Math.floor(n / 1000)) + ' Thousand ';
-      n %= 1000;
-    }
-    if (n >= 100) {
-      str += ones[Math.floor(n / 100)] + ' Hundred ';
-      n %= 100;
-    }
-    if (n >= 20) {
-      str += tens[Math.floor(n / 10)] + ' ';
-      n %= 10;
-    }
-    if (n > 0) {
-      str += ones[n] + ' ';
-    }
-    return str;
-  };
-  return convert(num).trim() + ' Rupees only';
-};
+import {
+  DEFAULT_INVOICE_PREFS,
+  INVOICE_TEMPLATES,
+  loadMergedInvoicePrefs,
+  normalizeHex,
+  numberToWordsIndian as sharedNumberToWordsIndian,
+} from '../utils/invoicePreferences';
 
 export function SaleDetailScreen({ navigation, route, params: propParams, onGoBack, onNavigate }) {
+  const { user } = useAuth();
   const { colors } = useTheme();
   const { showAlert, showConfirm, showSuccess, showError } = useAlert();
 
@@ -113,10 +50,11 @@ export function SaleDetailScreen({ navigation, route, params: propParams, onGoBa
   const [sendingWa, setSendingWa] = useState(false);
   const [viewInvoiceModal, setViewInvoiceModal] = useState(false);
   const [viewJpgModal, setViewJpgModal] = useState(false);
-  const [signatureUrl, setSignatureUrl] = useState('');
+  const [invoicePrefs, setInvoicePrefs] = useState(DEFAULT_INVOICE_PREFS);
+  const [previewTemplateOverride, setPreviewTemplateOverride] = useState(null);
 
   // Fetch full details
-  const fetchSaleDetail = async () => {
+  const fetchSaleDetail = useCallback(async () => {
     if (!saleId) {
       setLoading(false);
       return;
@@ -132,20 +70,17 @@ export function SaleDetailScreen({ navigation, route, params: propParams, onGoBa
     } finally {
       setLoading(false);
     }
-  };
+  }, [saleId]);
 
   useEffect(() => {
     fetchSaleDetail();
-    // Fetch authorized digital signature from invoice settings
-    invoiceService
-      .getInvoiceSettings()
-      .then((res) => {
-        if (res?.status && res?.data?.signature_url) {
-          setSignatureUrl(res.data.signature_url);
-        }
+    // Load active invoice template, colors, options & signature
+    loadMergedInvoicePrefs({ bypassCache: true })
+      .then((prefs) => {
+        setInvoicePrefs(prefs);
       })
       .catch(() => {});
-  }, [saleId]);
+  }, [fetchSaleDetail]);
 
   const handleBack = () => {
     if (propParams?.fromCreate || route?.params?.fromCreate) {
@@ -297,16 +232,33 @@ export function SaleDetailScreen({ navigation, route, params: propParams, onGoBa
     });
   };
 
-  // Financial fields
+  // Financial fields & Active Invoice Theme
   const subtotal = parseFloat(sale.subtotal || sale.total_amount || 0);
   const discountAmount = parseFloat(sale.discount_amount || sale.discount || 0);
   const grandTotal = parseFloat(sale.grand_total || sale.total_amount || 0);
   const items = Array.isArray(sale.items) ? sale.items : [];
-  const primaryColor = sale.invoice_settings?.primary_color || '#0A2540';
-  const accentColor = sale.invoice_settings?.accent_color || '#F58220';
-  const activeSignature = resolveSignatureUrl(
-    sale.signature_url || sale.invoice_settings?.signature_url || signatureUrl
+  const activeTemplateId = Number(
+    invoicePrefs.templateId || sale.invoice_settings?.template_id || 1
   );
+  const primaryColor = normalizeHex(
+    invoicePrefs.primaryColor || sale.invoice_settings?.primary_color,
+    '#0A2540'
+  );
+  const accentColor = normalizeHex(
+    invoicePrefs.accentColor || sale.invoice_settings?.accent_color,
+    '#F58220'
+  );
+  const activeSignature = resolveSignatureUrl(
+    sale.signature_url || sale.invoice_settings?.signature_url || invoicePrefs.signatureUrl
+  );
+
+  const handleOpenInvoicePreview = () => {
+    setPreviewTemplateOverride(null);
+    loadMergedInvoicePrefs({ bypassCache: true })
+      .then((prefs) => setInvoicePrefs(prefs))
+      .catch(() => {});
+    setViewInvoiceModal(true);
+  };
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={['top', 'left', 'right']}>
@@ -334,14 +286,14 @@ export function SaleDetailScreen({ navigation, route, params: propParams, onGoBa
             <Text style={[styles.toolbarTitle, { color: colors.textMuted }]}>INVOICE ACTIONS</Text>
 
             <View style={styles.actionGrid}>
-              {/* 1. View Invoice Button */}
+              {/* 1. View / Preview Invoice Button */}
               <TouchableOpacity
-                style={[styles.actionBtn, { backgroundColor: colors.primaryLight, borderColor: colors.primary }]}
-                onPress={() => setViewInvoiceModal(true)}
+                style={[styles.actionBtn, { backgroundColor: primaryColor, borderColor: primaryColor }]}
+                onPress={handleOpenInvoicePreview}
                 activeOpacity={0.75}
               >
-                <Icon name="eye" size={16} color={colors.primary} />
-                <Text style={[styles.actionBtnText, { color: colors.primary }]}>View</Text>
+                <Icon name="eye" size={16} color="#FFFFFF" />
+                <Text style={[styles.actionBtnText, { color: '#FFFFFF' }]}>Preview Invoice</Text>
               </TouchableOpacity>
 
               {/* 2. WhatsApp Button */}
@@ -551,14 +503,16 @@ export function SaleDetailScreen({ navigation, route, params: propParams, onGoBa
               </View>
             ) : null}
 
-            <View style={[styles.grandTotalBanner, { backgroundColor: colors.primary }]}>
+            <View style={[styles.grandTotalBanner, { backgroundColor: primaryColor }]}>
               <Text style={styles.grandTotalBannerLabel}>GRAND TOTAL</Text>
-              <Text style={styles.grandTotalBannerVal}>{formatCurrency(grandTotal)}</Text>
+              <View style={{ backgroundColor: accentColor, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 }}>
+                <Text style={styles.grandTotalBannerVal}>{formatCurrency(grandTotal)}</Text>
+              </View>
             </View>
 
-            <View style={[styles.amountWordsCard, { backgroundColor: colors.background, borderColor: colors.border }]}>
-              <Text style={[styles.amountWordsLabel, { color: colors.primary }]}>INVOICE AMOUNT IN WORDS</Text>
-              <Text style={[styles.amountWordsText, { color: colors.text }]}>{numberToWordsIndian(grandTotal)}</Text>
+            <View style={[styles.amountWordsCard, { backgroundColor: colors.background, borderColor: accentColor }]}>
+              <Text style={[styles.amountWordsLabel, { color: accentColor }]}>INVOICE AMOUNT IN WORDS</Text>
+              <Text style={[styles.amountWordsText, { color: colors.text }]}>{sharedNumberToWordsIndian(grandTotal)}</Text>
             </View>
           </View>
 
@@ -643,131 +597,74 @@ export function SaleDetailScreen({ navigation, route, params: propParams, onGoBa
         </View>
       </Modal>
 
-      {/* ── MODAL: FULL VIEW INVOICE MODAL ── */}
+      {/* ── MODAL: FULL VIEW / PREVIEW INVOICE MODAL ── */}
       <Modal
         visible={viewInvoiceModal}
         transparent={false}
         animationType="slide"
         onRequestClose={() => setViewInvoiceModal(false)}
       >
-        <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
+        <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={['top', 'left', 'right', 'bottom']}>
           <Header
             title={`Invoice #${sale.invoice_number || sale.id}`}
-            subtitle="Full Document View"
+            subtitle={
+              INVOICE_TEMPLATES.find(
+                (t) => t.id === (previewTemplateOverride ?? activeTemplateId)
+              )?.name || 'Full Document Preview'
+            }
             showBack={true}
             onBackPress={() => setViewInvoiceModal(false)}
+            rightIcon="palette"
+            onRightPress={() => {
+              setViewInvoiceModal(false);
+              if (onNavigate) onNavigate('InvoiceTemplates');
+            }}
           />
 
-          <ScrollView contentContainerStyle={styles.modalFullSheetScroll}>
-            <View style={[styles.invoiceSheet, { backgroundColor: '#FFFFFF', borderColor: colors.border }]}>
-              {/* Top Banner */}
-              <View style={[styles.sheetBanner, { backgroundColor: primaryColor }]}>
-                <View style={styles.bannerLeft}>
-                  <View style={styles.storeLogoBox}>
-                    <Text style={styles.storeLogoText}>
-                      {(sale.business_info?.name || 'BILLBOOK').slice(0, 2).toUpperCase()}
+          {/* Template Quick Switcher Strip */}
+          <View style={[styles.templateSwitcherBar, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.templateSwitcherScroll}>
+              {INVOICE_TEMPLATES.map((t) => {
+                const currentId = previewTemplateOverride ?? activeTemplateId;
+                const isSelected = currentId === t.id;
+                return (
+                  <TouchableOpacity
+                    key={t.id}
+                    onPress={() => setPreviewTemplateOverride(t.id)}
+                    style={[
+                      styles.templateSwitchPill,
+                      {
+                        backgroundColor: isSelected ? primaryColor : colors.cardSecondary,
+                        borderColor: isSelected ? primaryColor : colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.templateSwitchText,
+                        { color: isSelected ? '#FFFFFF' : colors.textSecondary },
+                      ]}
+                    >
+                      {t.id}. {t.name}
                     </Text>
-                  </View>
-                  <View style={styles.bannerInfo}>
-                    <Text style={styles.bannerStoreName}>
-                      {sale.business_info?.name || 'BILLBOOK STORE'}
-                    </Text>
-                    <Text style={styles.bannerStoreAddress}>
-                      {sale.business_info?.address || 'Ahmedabad, Gujarat, India'}
-                    </Text>
-                  </View>
-                </View>
-                <View style={styles.bannerRight}>
-                  <Text style={styles.bannerTagline}>TAX INVOICE</Text>
-                  <Text style={styles.bannerInvoiceNum}>#{sale.invoice_number || sale.id}</Text>
-                </View>
-              </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
 
-              {/* Meta */}
-              <View style={styles.sheetMetaRow}>
-                <View style={styles.billToBox}>
-                  <Text style={[styles.metaLabel, { color: accentColor }]}>BILL TO</Text>
-                  <Text style={styles.customerName}>{sale.customer_name || 'Walk-in Customer'}</Text>
-                  {sale.customer_phone ? <Text style={styles.metaSub}>Phone: {sale.customer_phone}</Text> : null}
-                  {sale.customer_address ? <Text style={styles.metaSub}>Address: {sale.customer_address}</Text> : null}
-                </View>
-                <View style={styles.invoiceMetaBox}>
-                  <Text style={[styles.metaLabel, { color: accentColor }]}>INVOICE DETAILS</Text>
-                  <Text style={styles.metaSub}>Date: {sale.sale_date || sale.date || 'Today'}</Text>
-                  <View style={styles.statusPillPaid}>
-                    <Text style={styles.statusPillPaidText}>PAID</Text>
-                  </View>
-                </View>
-              </View>
-
-              {/* Table */}
-              <View style={styles.tableCard}>
-                <View style={[styles.tableHeader, { backgroundColor: primaryColor }]}>
-                  <Text style={[styles.tableCol, styles.colIndex]}>#</Text>
-                  <Text style={[styles.tableCol, styles.colName]}>Item Name</Text>
-                  <Text style={[styles.tableCol, styles.colQty]}>Qty</Text>
-                  <Text style={[styles.tableCol, styles.colPrice]}>Rate</Text>
-                  <Text style={[styles.tableCol, styles.colTotal]}>Amount</Text>
-                </View>
-                {items.map((it, idx) => (
-                  <View key={idx} style={[styles.tableRow, idx % 2 === 1 && { backgroundColor: '#F8FAFC' }]}>
-                    <Text style={[styles.tableRowCol, styles.colIndex]}>{idx + 1}</Text>
-                    <Text style={[styles.tableRowCol, styles.colName, styles.boldDark]}>
-                      {it.product_name || `Product #${it.product_id}`}
-                    </Text>
-                    <Text style={[styles.tableRowCol, styles.colQty, styles.boldDark]}>{it.quantity}</Text>
-                    <Text style={[styles.tableRowCol, styles.colPrice]}>{formatCurrency(it.unit_price || it.price)}</Text>
-                    <Text style={[styles.tableRowCol, styles.colTotal, styles.boldDark]}>
-                      {formatCurrency(it.line_total || (it.unit_price || it.price) * it.quantity)}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-
-              {/* Summary */}
-              <View style={styles.summarySection}>
-                <View style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>Sub Total</Text>
-                  <Text style={styles.summaryVal}>{formatCurrency(subtotal)}</Text>
-                </View>
-                {discountAmount > 0 ? (
-                  <View style={styles.summaryRow}>
-                    <Text style={[styles.summaryLabel, { color: '#DC2626' }]}>Discount</Text>
-                    <Text style={[styles.summaryVal, { color: '#DC2626' }]}>- {formatCurrency(discountAmount)}</Text>
-                  </View>
-                ) : null}
-                <View style={[styles.grandTotalRow, { backgroundColor: accentColor }]}>
-                  <Text style={styles.grandTotalLabel}>TOTAL AMOUNT</Text>
-                  <Text style={styles.grandTotalVal}>{formatCurrency(grandTotal)}</Text>
-                </View>
-              </View>
-
-              {/* Words */}
-              <View style={styles.amountWordsBox}>
-                <Text style={[styles.amountWordsLabel, { color: accentColor }]}>INVOICE AMOUNT IN WORDS</Text>
-                <Text style={styles.amountWordsText}>{numberToWordsIndian(grandTotal)}</Text>
-              </View>
-
-              {/* Sign */}
-              <View style={styles.footerNoteRow}>
-                <View style={styles.termsBox}>
-                  <Text style={styles.termsLabel}>TERMS & CONDITIONS</Text>
-                  <Text style={styles.termsText}>{sale.notes || 'Goods once sold cannot be returned.'}</Text>
-                </View>
-                <View style={styles.signatoryBox}>
-                  {activeSignature ? (
-                    <Image
-                      source={{ uri: activeSignature }}
-                      style={styles.sheetSignatureImg}
-                      resizeMode="contain"
-                    />
-                  ) : (
-                    <View style={styles.signLine} />
-                  )}
-                  <Text style={styles.signLabel}>Authorized Signatory</Text>
-                </View>
-              </View>
-            </View>
+          <ScrollView contentContainerStyle={styles.modalFullSheetScroll} showsVerticalScrollIndicator={false}>
+            <InvoiceTemplateRenderer
+              sale={sale}
+              settings={{
+                ...invoicePrefs,
+                templateId: previewTemplateOverride ?? activeTemplateId,
+                primaryColor,
+                accentColor,
+                signatureUrl: activeSignature || invoicePrefs.signatureUrl,
+              }}
+              businessInfo={user}
+            />
           </ScrollView>
         </SafeAreaView>
       </Modal>
@@ -1038,198 +935,7 @@ const styles = StyleSheet.create({
     fontFamily: FONT_FAMILY,
     fontSize: 12,
   },
-  sheetSignatureImg: {
-    width: 100,
-    height: 40,
-    alignSelf: 'flex-end',
-    marginBottom: 4,
-  },
-  // Authentic Tax Invoice Sheet Preview
-  invoiceSheet: {
-    borderRadius: 18,
-    borderWidth: 1,
-    overflow: 'hidden',
-    marginBottom: 18,
-    elevation: 3,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
-  },
-  sheetBanner: {
-    padding: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  bannerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  storeLogoBox: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 10,
-  },
-  storeLogoText: {
-    fontFamily: FONT_FAMILY,
-    fontSize: 16,
-    fontWeight: '900',
-    color: '#FFFFFF',
-  },
-  bannerInfo: {
-    flex: 1,
-  },
-  bannerStoreName: {
-    fontFamily: FONT_FAMILY,
-    fontSize: 14,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
-  bannerStoreAddress: {
-    fontFamily: FONT_FAMILY,
-    fontSize: 10,
-    color: 'rgba(255,255,255,0.8)',
-    marginTop: 1,
-  },
-  bannerRight: {
-    alignItems: 'flex-end',
-  },
-  bannerTagline: {
-    fontFamily: FONT_FAMILY,
-    fontSize: 10,
-    fontWeight: '900',
-    color: '#FFFFFF',
-    letterSpacing: 0.5,
-  },
-  bannerInvoiceNum: {
-    fontFamily: FONT_FAMILY,
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    marginTop: 2,
-  },
-  sheetMetaRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    padding: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
-    backgroundColor: '#FAFAFA',
-  },
-  billToBox: {
-    flex: 1,
-  },
-  invoiceMetaBox: {
-    alignItems: 'flex-end',
-  },
-  metaLabel: {
-    fontFamily: FONT_FAMILY,
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-    marginBottom: 3,
-  },
-  customerName: {
-    fontFamily: FONT_FAMILY,
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#0F172A',
-  },
-  metaSub: {
-    fontFamily: FONT_FAMILY,
-    fontSize: 11,
-    color: '#64748B',
-    marginTop: 2,
-  },
-  boldDark: {
-    fontWeight: '700',
-    color: '#0F172A',
-  },
-  statusPillPaid: {
-    backgroundColor: '#DCFCE7',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 6,
-    marginTop: 4,
-  },
-  statusPillPaidText: {
-    fontFamily: FONT_FAMILY,
-    fontSize: 10,
-    fontWeight: '800',
-    color: '#15803D',
-  },
-  // Table
-  tableCard: {
-    margin: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    overflow: 'hidden',
-  },
-  tableHeader: {
-    flexDirection: 'row',
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-  },
-  tableCol: {
-    fontFamily: FONT_FAMILY,
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  tableRow: {
-    flexDirection: 'row',
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#F1F5F9',
-  },
-  tableRowCol: {
-    fontFamily: FONT_FAMILY,
-    fontSize: 11,
-    color: '#334155',
-  },
-  colIndex: {
-    width: 24,
-    textAlign: 'center',
-  },
-  colName: {
-    flex: 1,
-    paddingHorizontal: 6,
-  },
-  colQty: {
-    width: 36,
-    textAlign: 'center',
-  },
-  colPrice: {
-    width: 65,
-    textAlign: 'right',
-  },
-  colTotal: {
-    width: 75,
-    textAlign: 'right',
-  },
-  emptyTable: {
-    padding: 16,
-    alignItems: 'center',
-  },
-  emptyTableText: {
-    fontFamily: FONT_FAMILY,
-    fontSize: 12,
-    color: '#94A3B8',
-  },
   // Summary
-  summarySection: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#F1F5F9',
-  },
   summaryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1246,37 +952,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#0F172A',
   },
-  grandTotalRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
-    marginTop: 8,
-  },
-  grandTotalLabel: {
-    fontFamily: FONT_FAMILY,
-    fontSize: 12,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
-  grandTotalVal: {
-    fontFamily: FONT_FAMILY,
-    fontSize: 15,
-    fontWeight: '900',
-    color: '#FFFFFF',
-  },
-  // Words
-  amountWordsBox: {
-    marginHorizontal: 14,
-    marginBottom: 12,
-    padding: 10,
-    borderRadius: 10,
-    backgroundColor: '#F0F9FF',
-    borderWidth: 1,
-    borderColor: '#BAE6FD',
-  },
   amountWordsLabel: {
     fontFamily: FONT_FAMILY,
     fontSize: 9,
@@ -1289,46 +964,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontStyle: 'italic',
     color: '#0369A1',
-  },
-  // Terms & Signatory
-  footerNoteRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingBottom: 16,
-    gap: 12,
-  },
-  termsBox: {
-    flex: 1,
-  },
-  termsLabel: {
-    fontFamily: FONT_FAMILY,
-    fontSize: 9,
-    fontWeight: '800',
-    color: '#B45309',
-    marginBottom: 2,
-  },
-  termsText: {
-    fontFamily: FONT_FAMILY,
-    fontSize: 10,
-    color: '#78350F',
-    lineHeight: 14,
-  },
-  signatoryBox: {
-    width: 110,
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-  },
-  signLine: {
-    width: '100%',
-    height: 1,
-    backgroundColor: '#94A3B8',
-    marginBottom: 4,
-  },
-  signLabel: {
-    fontFamily: FONT_FAMILY,
-    fontSize: 9,
-    color: '#64748B',
   },
   // Delete Button
   deleteCardBtn: {
@@ -1406,6 +1041,25 @@ const styles = StyleSheet.create({
   modalFullSheetScroll: {
     padding: 16,
     paddingBottom: 40,
+  },
+  templateSwitcherBar: {
+    borderBottomWidth: 1,
+    paddingVertical: 10,
+  },
+  templateSwitcherScroll: {
+    paddingHorizontal: 14,
+    gap: 8,
+  },
+  templateSwitchPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  templateSwitchText: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 11.5,
+    fontWeight: '700',
   },
 });
 

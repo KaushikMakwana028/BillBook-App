@@ -10,20 +10,21 @@ export const invoiceService = {
   /**
    * Get active invoice customization settings
    */
-  getInvoiceSettings: async () => {
-    return await apiClient.get(ENDPOINTS.GET_INVOICE_SETTINGS);
+  getInvoiceSettings: async (options = {}) => {
+    return await apiClient.get(ENDPOINTS.GET_INVOICE_SETTINGS, {}, options);
   },
 
   /**
    * Save selected template ID and color scheme
-   * @param {Object} payload - { template_id, primary_color, accent_color }
+   * @param {Object} payload - { template_id, primary_color, accent_color, ... }
    */
-  saveInvoiceSettings: async ({ template_id, primary_color, accent_color }) => {
-    return await apiClient.post(ENDPOINTS.SAVE_INVOICE_SETTINGS, {
-      template_id,
-      primary_color,
-      accent_color,
-    });
+  saveInvoiceSettings: async (payload = {}) => {
+    const cleanPayload = {};
+    if (payload.template_id !== undefined) cleanPayload.template_id = payload.template_id;
+    if (payload.primary_color !== undefined) cleanPayload.primary_color = payload.primary_color;
+    if (payload.accent_color !== undefined) cleanPayload.accent_color = payload.accent_color;
+    if (payload.signature_url !== undefined) cleanPayload.signature_url = payload.signature_url;
+    return await apiClient.post(ENDPOINTS.SAVE_INVOICE_SETTINGS, cleanPayload);
   },
 
   /**

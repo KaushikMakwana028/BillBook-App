@@ -1,7 +1,11 @@
 /**
- * BillBook Invoice Templates Screen
- * Template chooser and brand color customizer for sales invoices
- * Synchronized with backend invoice settings API
+ * BillBook Invoice Templates & Customizer Screen
+ * - 6 genuinely distinct template layouts with live thumbnails
+ * - Primary + Accent color pickers, curated dual-tone themes & custom Hex inputs
+ * - Rich invoice display & layout options (heading, density, visibility toggles, terms)
+ * - Full-screen interactive Live Preview modal
+ * - Digital signature management
+ * Synchronized with backend invoice settings API + persistent local preferences
  */
 
 import React, { useState, useEffect } from 'react';
@@ -15,81 +19,67 @@ import {
   Image,
   TextInput,
   Modal,
+  Switch,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAlert } from '../contexts/AlertContext';
 import invoiceService from '../services/invoiceService';
-import { Header, Icon } from '../components';
+import {
+  Header,
+  Icon,
+  InvoiceTemplateRenderer,
+  InvoiceTemplateThumbnail,
+  SafeAreaView,
+} from '../components';
 import { FONT_FAMILY } from '../components/fonts';
 import { resolveSignatureUrl } from '../utils/imageUrl';
-
-const PRESET_COLORS = [
-  '#0A2540', // BillBook Deep Navy
-  '#F58220', // BillBook Brand Orange
-  '#2563EB', // Royal Blue
-  '#059669', // Emerald Green
-  '#7C3AED', // Violet
-  '#DC2626', // Crimson Red
-  '#0891B2', // Cyan Teal
-  '#1E293B', // Slate Dark
-];
-
-const TEMPLATES = [
-  {
-    id: 1,
-    name: 'Modern Slate',
-    tagline: 'Clean dual-tone layout with bold header banner & summary card.',
-    badge: 'Popular',
-    icon: 'document',
-  },
-  {
-    id: 2,
-    name: 'Classic Corporate',
-    tagline: 'Traditional corporate layout with structured borders and dense tables.',
-    badge: 'Recommended',
-    icon: 'briefcase',
-  },
-  {
-    id: 3,
-    name: 'Creative Accent',
-    tagline: 'Vibrant highlight headers with spacious typography for modern retail.',
-    badge: 'Creative',
-    icon: 'tag',
-  },
-  {
-    id: 4,
-    name: 'Thermal POS Receipt',
-    tagline: 'Compact, streamlined receipt format designed for thermal paper.',
-    badge: 'POS Fast',
-    icon: 'receipt',
-  },
-  {
-    id: 5,
-    name: 'Minimalist Clean',
-    tagline: 'Ultra-light, borderless styling focused on typographic elegance.',
-    badge: 'Clean',
-    icon: 'box',
-  },
-  {
-    id: 6,
-    name: 'Executive Detailed',
-    tagline: 'Comprehensive invoice with full tax breakdowns and terms.',
-    badge: 'Detailed',
-    icon: 'document',
-  },
-];
+import {
+  ACCENT_COLOR_PRESETS,
+  COLOR_PAIR_THEMES,
+  DEFAULT_INVOICE_PREFS,
+  INVOICE_TEMPLATES,
+  INVOICE_TITLE_OPTIONS,
+  PRIMARY_COLOR_PRESETS,
+  SAMPLE_PREVIEW_SALE,
+  isValidHex,
+  loadMergedInvoicePrefs,
+  normalizeHex,
+  saveLocalInvoicePrefs,
+} from '../utils/invoicePreferences';
 
 export function InvoiceTemplatesScreen({ navigation, onGoBack }) {
+  const { user } = useAuth();
   const { colors } = useTheme();
   const { showSuccess, showError } = useAlert();
 
   const [selectedTemplateId, setSelectedTemplateId] = useState(1);
   const [activeSavedTemplateId, setActiveSavedTemplateId] = useState(1);
-  const [primaryColor, setPrimaryColor] = useState('#0A2540');
-  const [accentColor, setAccentColor] = useState('#F58220');
+  const [primaryColor, setPrimaryColor] = useState(DEFAULT_INVOICE_PREFS.primaryColor);
+  const [accentColor, setAccentColor] = useState(DEFAULT_INVOICE_PREFS.accentColor);
+  const [primaryHexInput, setPrimaryHexInput] = useState(DEFAULT_INVOICE_PREFS.primaryColor);
+  const [accentHexInput, setAccentHexInput] = useState(DEFAULT_INVOICE_PREFS.accentColor);
+
+  // Extended Invoice Display Options
+  const [invoiceTitle, setInvoiceTitle] = useState(DEFAULT_INVOICE_PREFS.invoiceTitle);
+  const [density, setDensity] = useState(DEFAULT_INVOICE_PREFS.density);
+  const [showLogo, setShowLogo] = useState(DEFAULT_INVOICE_PREFS.showLogo);
+  const [showCustomerDetails, setShowCustomerDetails] = useState(DEFAULT_INVOICE_PREFS.showCustomerDetails);
+  const [showDiscount, setShowDiscount] = useState(DEFAULT_INVOICE_PREFS.showDiscount);
+  const [showAmountInWords, setShowAmountInWords] = useState(DEFAULT_INVOICE_PREFS.showAmountInWords);
+  const [showSignature, setShowSignature] = useState(DEFAULT_INVOICE_PREFS.showSignature);
+  const [showTerms, setShowTerms] = useState(DEFAULT_INVOICE_PREFS.showTerms);
+  const [showThankYou, setShowThankYou] = useState(DEFAULT_INVOICE_PREFS.showThankYou);
+  const [termsText, setTermsText] = useState(DEFAULT_INVOICE_PREFS.termsText);
+  const [footerMessage, setFooterMessage] = useState(DEFAULT_INVOICE_PREFS.footerMessage);
+  const [optionsExpanded, setOptionsExpanded] = useState(false);
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  // Live Preview Modal State
+  const [previewModalVisible, setPreviewModalVisible] = useState(false);
+  const [previewTemplateId, setPreviewTemplateId] = useState(1);
 
   // Digital Signature State
   const [signatureUrl, setSignatureUrl] = useState('');
@@ -97,31 +87,86 @@ export function InvoiceTemplatesScreen({ navigation, onGoBack }) {
   const [signatureModalVisible, setSignatureModalVisible] = useState(false);
   const [savingSignature, setSavingSignature] = useState(false);
 
-  // Load current active settings
-  const loadInvoiceSettings = () => {
-    invoiceService
-      .getInvoiceSettings()
-      .then((res) => {
-        if (res?.status && res?.data) {
-          const s = res.data;
-          const tid = parseInt(s.template_id || s.active_template_id || 1, 10);
-          setSelectedTemplateId(tid);
-          setActiveSavedTemplateId(tid);
-          if (s.primary_color) setPrimaryColor(s.primary_color);
-          if (s.accent_color) setAccentColor(s.accent_color);
-          if (s.signature_url) {
-            setSignatureUrl(s.signature_url);
-            setSignatureInput(s.signature_url);
-          }
-        }
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  };
+  const buildCurrentPrefs = (overrideTemplateId) => ({
+    templateId: overrideTemplateId ?? selectedTemplateId,
+    primaryColor: normalizeHex(primaryColor, '#0A2540'),
+    accentColor: normalizeHex(accentColor, '#F58220'),
+    invoiceTitle,
+    density,
+    showLogo,
+    showCustomerDetails,
+    showDiscount,
+    showAmountInWords,
+    showSignature,
+    showTerms,
+    showThankYou,
+    termsText: termsText.trim() || DEFAULT_INVOICE_PREFS.termsText,
+    footerMessage: footerMessage.trim() || DEFAULT_INVOICE_PREFS.footerMessage,
+    signatureUrl,
+  });
 
   useEffect(() => {
-    loadInvoiceSettings();
+    let mounted = true;
+    loadMergedInvoicePrefs({ bypassCache: true })
+      .then((prefs) => {
+        if (!mounted) return;
+        setSelectedTemplateId(prefs.templateId);
+        setActiveSavedTemplateId(prefs.templateId);
+        setPreviewTemplateId(prefs.templateId);
+        setPrimaryColor(prefs.primaryColor);
+        setPrimaryHexInput(prefs.primaryColor);
+        setAccentColor(prefs.accentColor);
+        setAccentHexInput(prefs.accentColor);
+        setInvoiceTitle(prefs.invoiceTitle);
+        setDensity(prefs.density);
+        setShowLogo(prefs.showLogo);
+        setShowCustomerDetails(prefs.showCustomerDetails);
+        setShowDiscount(prefs.showDiscount);
+        setShowAmountInWords(prefs.showAmountInWords);
+        setShowSignature(prefs.showSignature);
+        setShowTerms(prefs.showTerms);
+        setShowThankYou(prefs.showThankYou);
+        setTermsText(prefs.termsText);
+        setFooterMessage(prefs.footerMessage);
+        if (prefs.signatureUrl) {
+          setSignatureUrl(prefs.signatureUrl);
+          setSignatureInput(prefs.signatureUrl);
+        }
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
   }, []);
+
+  const applyPrimaryColor = (hex) => {
+    const clean = normalizeHex(hex, primaryColor);
+    setPrimaryColor(clean);
+    setPrimaryHexInput(clean);
+  };
+
+  const applyAccentColor = (hex) => {
+    const clean = normalizeHex(hex, accentColor);
+    setAccentColor(clean);
+    setAccentHexInput(clean);
+  };
+
+  const handlePrimaryHexChange = (val) => {
+    setPrimaryHexInput(val);
+    if (isValidHex(val)) {
+      setPrimaryColor(normalizeHex(val, primaryColor));
+    }
+  };
+
+  const handleAccentHexChange = (val) => {
+    setAccentHexInput(val);
+    if (isValidHex(val)) {
+      setAccentColor(normalizeHex(val, accentColor));
+    }
+  };
 
   const handleSaveSignature = async () => {
     if (!signatureInput.trim()) {
@@ -146,15 +191,22 @@ export function InvoiceTemplatesScreen({ navigation, onGoBack }) {
         // Fallback
       }
 
-      await invoiceService.saveInvoiceSettings({
-        template_id: activeSavedTemplateId,
-        primary_color: primaryColor,
-        accent_color: accentColor,
-        signature_url: trimmed,
-      }).catch(() => {});
+      await invoiceService
+        .saveInvoiceSettings({
+          template_id: activeSavedTemplateId,
+          primary_color: primaryColor,
+          accent_color: accentColor,
+          signature_url: trimmed,
+        })
+        .catch(() => {});
 
       const updatedSig = uploadRes?.data?.signature_url || trimmed;
       setSignatureUrl(updatedSig);
+      await saveLocalInvoicePrefs({
+        ...buildCurrentPrefs(activeSavedTemplateId),
+        signatureUrl: updatedSig,
+      });
+
       showSuccess({
         title: 'Signature Saved 🎉',
         message: 'Digital signature has been saved and will appear on all future invoices.',
@@ -175,6 +227,10 @@ export function InvoiceTemplatesScreen({ navigation, onGoBack }) {
       await invoiceService.removeSignature();
       setSignatureUrl('');
       setSignatureInput('');
+      await saveLocalInvoicePrefs({
+        ...buildCurrentPrefs(activeSavedTemplateId),
+        signatureUrl: '',
+      });
       showSuccess({
         title: 'Signature Removed',
         message: 'Business signature has been cleared from invoices.',
@@ -195,27 +251,38 @@ export function InvoiceTemplatesScreen({ navigation, onGoBack }) {
     }
   };
 
-  const handleSaveTemplate = async (templateIdToSave = selectedTemplateId) => {
+  const handleSaveSettings = async (
+    templateIdToSave = activeSavedTemplateId,
+    successTitle = 'Invoice Settings Saved! 🎉',
+    successMsg = null
+  ) => {
     setSaving(true);
+    const prefsToSave = buildCurrentPrefs(templateIdToSave);
     try {
-      const payload = {
-        template_id: templateIdToSave,
-        primary_color: primaryColor,
-        accent_color: accentColor,
-      };
+      await saveLocalInvoicePrefs(prefsToSave);
 
-      const res = await invoiceService.saveInvoiceSettings(payload);
+      const res = await invoiceService.saveInvoiceSettings({
+        template_id: templateIdToSave,
+        primary_color: prefsToSave.primaryColor,
+        accent_color: prefsToSave.accentColor,
+      });
+
       if (res?.status) {
         setSelectedTemplateId(templateIdToSave);
         setActiveSavedTemplateId(templateIdToSave);
+        const tmplName =
+          INVOICE_TEMPLATES.find((t) => t.id === templateIdToSave)?.name ||
+          `Template #${templateIdToSave}`;
         showSuccess({
-          title: 'Template Activated! 🎉',
-          message: `Template #${templateIdToSave} is now active for all business invoices and customer bills.`,
+          title: successTitle,
+          message:
+            successMsg ||
+            `${tmplName} with your selected colors and options is now active across all invoices.`,
         });
       } else {
         showError({
           title: 'Could Not Save',
-          message: res?.message || 'Failed to update invoice template settings.',
+          message: res?.message || 'Failed to update invoice template settings on server.',
         });
       }
     } catch (err) {
@@ -228,14 +295,24 @@ export function InvoiceTemplatesScreen({ navigation, onGoBack }) {
     }
   };
 
+  const openPreview = (templateId = selectedTemplateId) => {
+    setPreviewTemplateId(templateId);
+    setPreviewModalVisible(true);
+  };
+
+  const activeTemplateObj =
+    INVOICE_TEMPLATES.find((t) => t.id === activeSavedTemplateId) || INVOICE_TEMPLATES[0];
+
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={['top', 'left', 'right']}>
-      {/* Header */}
+      {/* Header with Live Preview shortcut */}
       <Header
-        title="Invoice Templates"
-        subtitle="Choose design & brand colors"
+        title="Invoice Customizer"
+        subtitle="Templates, colors & live preview"
         showBack={true}
         onBackPress={handleBack}
+        rightIcon="eye"
+        onRightPress={() => openPreview(selectedTemplateId)}
       />
 
       {loading ? (
@@ -247,15 +324,109 @@ export function InvoiceTemplatesScreen({ navigation, onGoBack }) {
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          {/* ── COLOR PALETTE PICKER ── */}
+          {/* ── ACTIVE SUMMARY & QUICK PREVIEW BANNER ── */}
+          <View style={[styles.summaryBanner, { backgroundColor: primaryColor }]}>
+            <View style={{ flex: 1, paddingRight: 10 }}>
+              <Text style={styles.summaryEyebrow}>ACTIVE INVOICE DESIGN</Text>
+              <Text style={styles.summaryTitle}>{activeTemplateObj.name}</Text>
+              <View style={styles.summaryColorChips}>
+                <View style={styles.summarySwatchRow}>
+                  <View style={[styles.miniDot, { backgroundColor: primaryColor, borderColor: '#FFF' }]} />
+                  <View style={[styles.miniDot, { backgroundColor: accentColor, borderColor: '#FFF', marginLeft: -5 }]} />
+                  <Text style={styles.summarySwatchText}>
+                    {primaryColor} • {accentColor}
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => openPreview(selectedTemplateId)}
+              style={[styles.heroPreviewBtn, { backgroundColor: accentColor }]}
+            >
+              <Icon name="eye" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+              <Text style={styles.heroPreviewBtnText}>Preview</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* ── COLOR THEME & PALETTE PICKER ── */}
           <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Text style={[styles.cardTitle, { color: colors.text }]}>Brand Header Color</Text>
-            <Text style={[styles.cardSubtitle, { color: colors.textMuted }]}>
-              Applied to invoice headers, item tables, and primary highlights
+            <View style={styles.cardHeaderRow}>
+              <View style={[styles.iconBoxMini, { backgroundColor: colors.primaryLight }]}>
+                <Icon name="palette" size={16} color={colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.cardTitle, { color: colors.text }]}>Invoice Color Theme</Text>
+                <Text style={[styles.cardSubtitle, { color: colors.textMuted, marginBottom: 0 }]}>
+                  Pick a curated pair or customize primary & accent colors
+                </Text>
+              </View>
+            </View>
+
+            {/* Curated Dual-Tone Pairs */}
+            <Text style={[styles.subFieldLabel, { color: colors.textSecondary, marginTop: 12 }]}>
+              Quick Color Pairs
             </Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pairScroll}>
+              {COLOR_PAIR_THEMES.map((pair) => {
+                const isPairActive =
+                  primaryColor.toUpperCase() === pair.primary.toUpperCase() &&
+                  accentColor.toUpperCase() === pair.accent.toUpperCase();
+                return (
+                  <TouchableOpacity
+                    key={pair.name}
+                    activeOpacity={0.8}
+                    onPress={() => {
+                      applyPrimaryColor(pair.primary);
+                      applyAccentColor(pair.accent);
+                    }}
+                    style={[
+                      styles.pairPill,
+                      {
+                        backgroundColor: isPairActive ? colors.primaryLight : colors.cardSecondary,
+                        borderColor: isPairActive ? colors.primary : colors.border,
+                      },
+                    ]}
+                  >
+                    <View style={styles.pairCircles}>
+                      <View style={[styles.pairCircle, { backgroundColor: pair.primary }]} />
+                      <View style={[styles.pairCircle, { backgroundColor: pair.accent, marginLeft: -6 }]} />
+                    </View>
+                    <Text
+                      style={[
+                        styles.pairText,
+                        { color: isPairActive ? colors.primary : colors.text },
+                      ]}
+                    >
+                      {pair.name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+
+            {/* Primary Color */}
+            <View style={styles.colorHeaderRow}>
+              <Text style={[styles.subFieldLabel, { color: colors.textSecondary }]}>
+                Primary Brand Color
+              </Text>
+              <View style={[styles.hexPill, { borderColor: colors.border, backgroundColor: colors.background }]}>
+                <View style={[styles.hexDot, { backgroundColor: primaryColor }]} />
+                <TextInput
+                  value={primaryHexInput}
+                  onChangeText={handlePrimaryHexChange}
+                  style={[styles.hexInput, { color: colors.text }]}
+                  maxLength={7}
+                  autoCapitalize="characters"
+                  placeholder="#0A2540"
+                  placeholderTextColor={colors.textMuted}
+                />
+              </View>
+            </View>
 
             <View style={styles.colorRow}>
-              {PRESET_COLORS.map((hex) => {
+              {PRIMARY_COLOR_PRESETS.map((hex) => {
                 const isSelected = primaryColor.toLowerCase() === hex.toLowerCase();
                 return (
                   <TouchableOpacity
@@ -265,7 +436,7 @@ export function InvoiceTemplatesScreen({ navigation, onGoBack }) {
                       { backgroundColor: hex },
                       isSelected && styles.activeColorCircle,
                     ]}
-                    onPress={() => setPrimaryColor(hex)}
+                    onPress={() => applyPrimaryColor(hex)}
                     activeOpacity={0.8}
                   >
                     {isSelected ? <Icon name="check" size={14} color="#FFFFFF" /> : null}
@@ -273,6 +444,248 @@ export function InvoiceTemplatesScreen({ navigation, onGoBack }) {
                 );
               })}
             </View>
+
+            {/* Accent Color */}
+            <View style={[styles.colorHeaderRow, { marginTop: 14 }]}>
+              <Text style={[styles.subFieldLabel, { color: colors.textSecondary }]}>
+                Accent & Highlight Color
+              </Text>
+              <View style={[styles.hexPill, { borderColor: colors.border, backgroundColor: colors.background }]}>
+                <View style={[styles.hexDot, { backgroundColor: accentColor }]} />
+                <TextInput
+                  value={accentHexInput}
+                  onChangeText={handleAccentHexChange}
+                  style={[styles.hexInput, { color: colors.text }]}
+                  maxLength={7}
+                  autoCapitalize="characters"
+                  placeholder="#F58220"
+                  placeholderTextColor={colors.textMuted}
+                />
+              </View>
+            </View>
+
+            <View style={styles.colorRow}>
+              {ACCENT_COLOR_PRESETS.map((hex) => {
+                const isSelected = accentColor.toLowerCase() === hex.toLowerCase();
+                return (
+                  <TouchableOpacity
+                    key={hex}
+                    style={[
+                      styles.colorCircle,
+                      { backgroundColor: hex },
+                      isSelected && styles.activeColorCircle,
+                    ]}
+                    onPress={() => applyAccentColor(hex)}
+                    activeOpacity={0.8}
+                  >
+                    {isSelected ? <Icon name="check" size={14} color="#FFFFFF" /> : null}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {/* Save Colors Button */}
+            <TouchableOpacity
+              style={[styles.saveColorsBtn, { backgroundColor: colors.navy }]}
+              onPress={() =>
+                handleSaveSettings(
+                  activeSavedTemplateId,
+                  'Colors Updated! 🎨',
+                  'Your primary and accent colors are saved and applied to all invoices.'
+                )
+              }
+              disabled={saving}
+              activeOpacity={0.85}
+            >
+              {saving ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <>
+                  <Icon name="check" size={15} color="#FFFFFF" style={{ marginRight: 6 }} />
+                  <Text style={styles.saveColorsBtnText}>Save Brand Colors</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+
+          {/* ── INVOICE DISPLAY & LAYOUT OPTIONS ── */}
+          <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <TouchableOpacity
+              activeOpacity={0.75}
+              onPress={() => setOptionsExpanded((v) => !v)}
+              style={styles.accordionHeader}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                <View style={[styles.iconBoxMini, { backgroundColor: '#EFF4F9' }]}>
+                  <Icon name="layers" size={16} color={colors.navy} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.cardTitle, { color: colors.text }]}>Invoice Layout & Display Options</Text>
+                  <Text style={[styles.cardSubtitle, { color: colors.textMuted, marginBottom: 0 }]}>
+                    Heading ({invoiceTitle}), density ({density}), sections & footer notes
+                  </Text>
+                </View>
+              </View>
+              <Icon name={optionsExpanded ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textMuted} />
+            </TouchableOpacity>
+
+            {optionsExpanded ? (
+              <View style={styles.optionsBody}>
+                {/* Invoice Title / Heading */}
+                <Text style={[styles.subFieldLabel, { color: colors.textSecondary, marginTop: 10 }]}>
+                  Document Title Heading
+                </Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipScroll}>
+                  {INVOICE_TITLE_OPTIONS.map((titleOpt) => {
+                    const active = invoiceTitle === titleOpt;
+                    return (
+                      <TouchableOpacity
+                        key={titleOpt}
+                        onPress={() => setInvoiceTitle(titleOpt)}
+                        style={[
+                          styles.optionChip,
+                          {
+                            backgroundColor: active ? colors.primary : colors.cardSecondary,
+                            borderColor: active ? colors.primary : colors.border,
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.optionChipText,
+                            { color: active ? '#FFFFFF' : colors.textSecondary },
+                          ]}
+                        >
+                          {titleOpt}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+
+                {/* Row Density */}
+                <Text style={[styles.subFieldLabel, { color: colors.textSecondary, marginTop: 12 }]}>
+                  Item Table Spacing
+                </Text>
+                <View style={styles.densityRow}>
+                  {[
+                    { id: 'standard', label: 'Standard (Spacious)' },
+                    { id: 'compact', label: 'Compact (More Items)' },
+                  ].map((d) => {
+                    const active = density === d.id;
+                    return (
+                      <TouchableOpacity
+                        key={d.id}
+                        onPress={() => setDensity(d.id)}
+                        style={[
+                          styles.densityBtn,
+                          {
+                            backgroundColor: active ? colors.primaryLight : colors.cardSecondary,
+                            borderColor: active ? colors.primary : colors.border,
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.densityBtnText,
+                            { color: active ? colors.primary : colors.textSecondary },
+                          ]}
+                        >
+                          {d.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {/* Visibility Toggles */}
+                <View style={[styles.divider, { backgroundColor: colors.border, marginVertical: 12 }]} />
+
+                {[
+                  { label: 'Show Business Logo / Monogram', val: showLogo, set: setShowLogo },
+                  { label: 'Show Customer Phone & Address', val: showCustomerDetails, set: setShowCustomerDetails },
+                  { label: 'Show Item Discounts', val: showDiscount, set: setShowDiscount },
+                  { label: 'Show Amount in Words', val: showAmountInWords, set: setShowAmountInWords },
+                  { label: 'Show Authorized Signature', val: showSignature, set: setShowSignature },
+                  { label: 'Show Terms & Conditions', val: showTerms, set: setShowTerms },
+                  { label: 'Show Thank You Footer Note', val: showThankYou, set: setShowThankYou },
+                ].map((item) => (
+                  <View key={item.label} style={styles.toggleRow}>
+                    <Text style={[styles.toggleLabel, { color: colors.text }]}>{item.label}</Text>
+                    <Switch
+                      value={item.val}
+                      onValueChange={item.set}
+                      trackColor={{ false: colors.border, true: colors.primary }}
+                      thumbColor="#FFFFFF"
+                    />
+                  </View>
+                ))}
+
+                {/* Custom Terms & Footer Message */}
+                {showTerms ? (
+                  <View style={{ marginTop: 10 }}>
+                    <Text style={[styles.subFieldLabel, { color: colors.textSecondary }]}>
+                      Default Terms & Conditions
+                    </Text>
+                    <TextInput
+                      value={termsText}
+                      onChangeText={setTermsText}
+                      placeholder="Goods once sold cannot be returned..."
+                      placeholderTextColor={colors.textMuted}
+                      style={[
+                        styles.optionInput,
+                        { backgroundColor: colors.background, borderColor: colors.border, color: colors.text },
+                      ]}
+                    />
+                  </View>
+                ) : null}
+
+                {showThankYou ? (
+                  <View style={{ marginTop: 10 }}>
+                    <Text style={[styles.subFieldLabel, { color: colors.textSecondary }]}>
+                      Thank You Footer Message
+                    </Text>
+                    <TextInput
+                      value={footerMessage}
+                      onChangeText={setFooterMessage}
+                      placeholder="Thank you for your business!"
+                      placeholderTextColor={colors.textMuted}
+                      style={[
+                        styles.optionInput,
+                        { backgroundColor: colors.background, borderColor: colors.border, color: colors.text },
+                      ]}
+                    />
+                  </View>
+                ) : null}
+
+                <View style={styles.optionsActionRow}>
+                  <TouchableOpacity
+                    style={[styles.previewOutlineBtn, { borderColor: colors.primary }]}
+                    onPress={() => openPreview(selectedTemplateId)}
+                    activeOpacity={0.8}
+                  >
+                    <Icon name="eye" size={15} color={colors.primary} style={{ marginRight: 6 }} />
+                    <Text style={[styles.previewOutlineBtnText, { color: colors.primary }]}>Preview</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.saveOptionsBtn, { backgroundColor: colors.primary }]}
+                    onPress={() =>
+                      handleSaveSettings(
+                        activeSavedTemplateId,
+                        'Options Saved! ✓',
+                        'Your invoice layout and display preferences have been saved.'
+                      )
+                    }
+                    disabled={saving}
+                    activeOpacity={0.85}
+                  >
+                    <Icon name="check" size={15} color="#FFFFFF" style={{ marginRight: 6 }} />
+                    <Text style={styles.saveOptionsBtnText}>Save Options</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : null}
           </View>
 
           {/* ── DIGITAL SIGNATURE SECTION ── */}
@@ -283,13 +696,13 @@ export function InvoiceTemplatesScreen({ navigation, onGoBack }) {
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={[styles.cardTitle, { color: colors.text }]}>Authorized Digital Signature</Text>
-                <Text style={[styles.cardSubtitle, { color: colors.textMuted }]}>
+                <Text style={[styles.cardSubtitle, { color: colors.textMuted, marginBottom: 0 }]}>
                   Appears at the bottom-right of every invoice PDF and printed bill
                 </Text>
               </View>
             </View>
 
-            <View style={[styles.sigPreviewBox, { backgroundColor: colors.background, borderColor: colors.border }]}>
+            <View style={[styles.sigPreviewBox, { backgroundColor: colors.background, borderColor: colors.border, marginTop: 12 }]}>
               {signatureUrl && resolveSignatureUrl(signatureUrl) ? (
                 <View style={{ alignItems: 'center' }}>
                   <Image
@@ -339,11 +752,18 @@ export function InvoiceTemplatesScreen({ navigation, onGoBack }) {
             </View>
           </View>
 
-          {/* ── TEMPLATES LIST ── */}
+          {/* ── TEMPLATES LIST (6 DISTINCT DESIGNS) ── */}
           <View style={styles.templatesSection}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>Available Template Formats</Text>
+            <View style={styles.sectionTitleRow}>
+              <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>
+                Choose Invoice Template ({INVOICE_TEMPLATES.length})
+              </Text>
+              <Text style={[styles.sectionHint, { color: colors.textMuted }]}>
+                Tap Preview to inspect full page
+              </Text>
+            </View>
 
-            {TEMPLATES.map((tmpl) => {
+            {INVOICE_TEMPLATES.map((tmpl) => {
               const isSelected = selectedTemplateId === tmpl.id;
               const isCurrentlyActive = activeSavedTemplateId === tmpl.id;
 
@@ -356,7 +776,7 @@ export function InvoiceTemplatesScreen({ navigation, onGoBack }) {
                     isSelected && styles.activeCardGlow,
                   ]}
                   onPress={() => setSelectedTemplateId(tmpl.id)}
-                  activeOpacity={0.8}
+                  activeOpacity={0.85}
                 >
                   {/* Top Row: Template Name & Badge */}
                   <View style={styles.templateHeaderRow}>
@@ -368,6 +788,11 @@ export function InvoiceTemplatesScreen({ navigation, onGoBack }) {
                         <View style={[styles.badge, { backgroundColor: colors.primaryLight }]}>
                           <Text style={[styles.badgeText, { color: colors.primary }]}>
                             {tmpl.badge}
+                          </Text>
+                        </View>
+                        <View style={[styles.layoutPill, { backgroundColor: colors.cardSecondary }]}>
+                          <Text style={[styles.layoutPillText, { color: colors.textSecondary }]}>
+                            {tmpl.layoutLabel}
                           </Text>
                         </View>
                       </View>
@@ -384,79 +809,165 @@ export function InvoiceTemplatesScreen({ navigation, onGoBack }) {
                     ) : null}
                   </View>
 
-                  {/* Visual Mock Invoice Preview */}
-                  <View style={[styles.mockInvoiceBox, { borderColor: colors.border }]}>
-                    {/* Header Banner */}
-                    <View style={[styles.mockHeader, { backgroundColor: primaryColor }]}>
-                      <View style={styles.mockHeaderLeft}>
-                        <View style={styles.mockLogoSquare}>
-                          <Text style={styles.mockLogoText}>B</Text>
-                        </View>
-                        <Text style={styles.mockStoreName}>BILLBOOK STORE</Text>
-                      </View>
-                      <Text style={styles.mockInvNo}>INV-001</Text>
-                    </View>
+                  {/* Distinct Live Visual Miniature Preview for this Template */}
+                  <InvoiceTemplateThumbnail
+                    templateId={tmpl.id}
+                    primaryColor={primaryColor}
+                    accentColor={accentColor}
+                  />
 
-                    {/* Meta Row */}
-                    <View style={styles.mockMetaRow}>
-                      <Text style={styles.mockCustomer}>BILL TO: Rahul Sharma</Text>
-                      <Text style={styles.mockDate}>Today</Text>
-                    </View>
-
-                    {/* Table Rows */}
-                    <View style={[styles.mockTableHead, { backgroundColor: primaryColor }]}>
-                      <Text style={[styles.mockCol, { flex: 2 }]}>ITEM</Text>
-                      <Text style={[styles.mockCol, { width: 30, textAlign: 'center' }]}>QTY</Text>
-                      <Text style={[styles.mockCol, { width: 50, textAlign: 'right' }]}>AMT</Text>
-                    </View>
-                    <View style={styles.mockTableRow}>
-                      <Text style={[styles.mockRowText, { flex: 2 }]}>Call of Duty MW-III</Text>
-                      <Text style={[styles.mockRowText, { width: 30, textAlign: 'center' }]}>1</Text>
-                      <Text style={[styles.mockRowText, { width: 50, textAlign: 'right', fontWeight: '700' }]}>₹5,549</Text>
-                    </View>
-                    <View style={[styles.mockTableRow, { backgroundColor: '#F8FAFC' }]}>
-                      <Text style={[styles.mockRowText, { flex: 2 }]}>Palworld Special</Text>
-                      <Text style={[styles.mockRowText, { width: 30, textAlign: 'center' }]}>1</Text>
-                      <Text style={[styles.mockRowText, { width: 50, textAlign: 'right', fontWeight: '700' }]}>₹1,170</Text>
-                    </View>
-
-                    {/* Total Row */}
-                    <View style={styles.mockTotalRow}>
-                      <Text style={styles.mockTotalLabel}>TOTAL DUE:</Text>
-                      <View style={[styles.mockTotalBadge, { backgroundColor: accentColor }]}>
-                        <Text style={styles.mockTotalVal}>₹6,719.00</Text>
-                      </View>
-                    </View>
-                  </View>
-
-                  {/* Activate Button */}
-                  <TouchableOpacity
-                    style={[
-                      styles.activateBtn,
-                      {
-                        backgroundColor: isCurrentlyActive ? colors.cardSecondary : colors.primary,
-                        borderColor: isCurrentlyActive ? colors.border : colors.primary,
-                      },
-                    ]}
-                    onPress={() => handleSaveTemplate(tmpl.id)}
-                    disabled={saving}
-                    activeOpacity={0.8}
-                  >
-                    <Text
+                  {/* Action Row: Preview + Activate */}
+                  <View style={styles.cardActionRow}>
+                    <TouchableOpacity
                       style={[
-                        styles.activateBtnText,
-                        { color: isCurrentlyActive ? colors.textSecondary : '#FFFFFF' },
+                        styles.previewCardBtn,
+                        { backgroundColor: colors.cardSecondary, borderColor: colors.border },
                       ]}
+                      onPress={() => openPreview(tmpl.id)}
+                      activeOpacity={0.8}
                     >
-                      {isCurrentlyActive ? 'Currently Active Template' : 'Activate This Template'}
-                    </Text>
-                  </TouchableOpacity>
+                      <Icon name="eye" size={15} color={colors.navy} style={{ marginRight: 6 }} />
+                      <Text style={[styles.previewCardBtnText, { color: colors.navy }]}>Preview</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.activateBtn,
+                        {
+                          flex: 1.5,
+                          backgroundColor: isCurrentlyActive ? '#ECFDF5' : colors.primary,
+                          borderColor: isCurrentlyActive ? '#A7F3D0' : colors.primary,
+                        },
+                      ]}
+                      onPress={() => handleSaveSettings(tmpl.id, 'Template Activated! 🎉')}
+                      disabled={saving}
+                      activeOpacity={0.8}
+                    >
+                      <Text
+                        style={[
+                          styles.activateBtnText,
+                          { color: isCurrentlyActive ? '#059669' : '#FFFFFF' },
+                        ]}
+                      >
+                        {isCurrentlyActive ? 'Active Template ✓' : 'Activate Template'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
                 </TouchableOpacity>
               );
             })}
           </View>
         </ScrollView>
       )}
+
+      {/* ── MODAL: FULL LIVE INTERACTIVE INVOICE PREVIEW ── */}
+      <Modal
+        visible={previewModalVisible}
+        transparent={false}
+        animationType="slide"
+        onRequestClose={() => setPreviewModalVisible(false)}
+      >
+        <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={['top', 'left', 'right', 'bottom']}>
+          <Header
+            title="Live Invoice Preview"
+            subtitle={
+              INVOICE_TEMPLATES.find((t) => t.id === previewTemplateId)?.name || 'Preview'
+            }
+            showBack={true}
+            onBackPress={() => setPreviewModalVisible(false)}
+          />
+
+          {/* Quick Template Switcher Bar */}
+          <View style={[styles.previewSwitcherBar, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.previewTabScroll}>
+              {INVOICE_TEMPLATES.map((t) => {
+                const active = previewTemplateId === t.id;
+                return (
+                  <TouchableOpacity
+                    key={t.id}
+                    onPress={() => setPreviewTemplateId(t.id)}
+                    style={[
+                      styles.previewTabPill,
+                      {
+                        backgroundColor: active ? primaryColor : colors.cardSecondary,
+                        borderColor: active ? primaryColor : colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.previewTabText,
+                        { color: active ? '#FFFFFF' : colors.textSecondary },
+                      ]}
+                    >
+                      {t.id}. {t.name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+
+            {/* Quick Color Pair Strip inside Preview */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.previewColorStrip}>
+              {COLOR_PAIR_THEMES.map((pair) => {
+                const active =
+                  primaryColor.toUpperCase() === pair.primary.toUpperCase() &&
+                  accentColor.toUpperCase() === pair.accent.toUpperCase();
+                return (
+                  <TouchableOpacity
+                    key={pair.name}
+                    onPress={() => {
+                      applyPrimaryColor(pair.primary);
+                      applyAccentColor(pair.accent);
+                    }}
+                    style={[
+                      styles.previewPairChip,
+                      {
+                        borderColor: active ? pair.primary : colors.border,
+                        backgroundColor: active ? colors.primaryLight : colors.background,
+                      },
+                    ]}
+                  >
+                    <View style={[styles.miniSwatch, { backgroundColor: pair.primary }]} />
+                    <View style={[styles.miniSwatch, { backgroundColor: pair.accent, marginLeft: -4 }]} />
+                    <Text style={[styles.previewPairText, { color: colors.text }]}>{pair.name}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+
+          <ScrollView contentContainerStyle={styles.previewScrollContent} showsVerticalScrollIndicator={false}>
+            <InvoiceTemplateRenderer
+              sale={SAMPLE_PREVIEW_SALE}
+              settings={buildCurrentPrefs(previewTemplateId)}
+              businessInfo={user}
+            />
+          </ScrollView>
+
+          {/* Bottom Activate Bar */}
+          <View style={[styles.previewBottomBar, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
+            <TouchableOpacity
+              style={[styles.previewCloseBtn, { borderColor: colors.border, backgroundColor: colors.cardSecondary }]}
+              onPress={() => setPreviewModalVisible(false)}
+            >
+              <Text style={[styles.previewCloseBtnText, { color: colors.textSecondary }]}>Close</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.previewActivateBtn, { backgroundColor: colors.primary }]}
+              onPress={async () => {
+                setPreviewModalVisible(false);
+                await handleSaveSettings(previewTemplateId, 'Template Activated! 🎉');
+              }}
+              disabled={saving}
+            >
+              <Icon name="check" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+              <Text style={styles.previewActivateBtnText}>Use & Save This Design</Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      </Modal>
 
       {/* ── MODAL: SIGNATURE MANAGEMENT ── */}
       <Modal
@@ -484,7 +995,6 @@ export function InvoiceTemplatesScreen({ navigation, onGoBack }) {
                 Provide an image URL or uploaded file path for your authorized signature stamp.
               </Text>
 
-              {/* Preview */}
               <View style={[styles.sigPreviewContainer, { backgroundColor: colors.background, borderColor: colors.border }]}>
                 {signatureUrl && resolveSignatureUrl(signatureUrl) ? (
                   <View style={{ alignItems: 'center' }}>
@@ -507,7 +1017,6 @@ export function InvoiceTemplatesScreen({ navigation, onGoBack }) {
                 )}
               </View>
 
-              {/* Input */}
               <View style={styles.sigInputGroup}>
                 <Text style={[styles.sigInputLabel, { color: colors.textSecondary }]}>
                   Signature Image URL or Relative Path
@@ -522,7 +1031,6 @@ export function InvoiceTemplatesScreen({ navigation, onGoBack }) {
                 />
               </View>
 
-              {/* Save */}
               <TouchableOpacity
                 style={[styles.saveSigBtn, { backgroundColor: colors.primary }, savingSignature && { opacity: 0.7 }]}
                 onPress={handleSaveSignature}
@@ -549,9 +1057,7 @@ export function InvoiceTemplatesScreen({ navigation, onGoBack }) {
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-  },
+  safeArea: { flex: 1 },
   centerContainer: {
     flex: 1,
     alignItems: 'center',
@@ -567,6 +1073,67 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 48,
   },
+  summaryBanner: {
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    elevation: 4,
+    shadowColor: '#0A2540',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.16,
+    shadowRadius: 10,
+  },
+  summaryEyebrow: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    color: 'rgba(255,255,255,0.75)',
+  },
+  summaryTitle: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#FFFFFF',
+    marginTop: 2,
+  },
+  summaryColorChips: {
+    marginTop: 6,
+  },
+  summarySwatchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  miniDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 1.5,
+  },
+  summarySwatchText: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 11,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.9)',
+    marginLeft: 7,
+  },
+  heroPreviewBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    elevation: 2,
+  },
+  heroPreviewBtnText: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
   card: {
     borderRadius: 18,
     borderWidth: 1,
@@ -581,24 +1148,85 @@ const styles = StyleSheet.create({
     fontFamily: FONT_FAMILY,
     fontSize: 15,
     fontWeight: '800',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   cardSubtitle: {
     fontFamily: FONT_FAMILY,
     fontSize: 12,
     marginBottom: 14,
   },
-  colorRow: {
+  subFieldLabel: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  pairScroll: {
+    gap: 8,
+    paddingBottom: 12,
+  },
+  pairPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 7,
+  },
+  pairCircles: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  pairCircle: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+  },
+  pairText: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 11.5,
+    fontWeight: '700',
+  },
+  colorHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  hexPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    height: 32,
+  },
+  hexDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    marginRight: 6,
+  },
+  hexInput: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 11.5,
+    fontWeight: '700',
+    width: 66,
+    paddingVertical: 0,
+  },
+  colorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     flexWrap: 'wrap',
     gap: 10,
   },
   colorCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -607,17 +1235,136 @@ const styles = StyleSheet.create({
     borderColor: '#FFFFFF',
     elevation: 4,
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
+    shadowOpacity: 0.25,
     shadowRadius: 4,
   },
+  saveColorsBtn: {
+    height: 44,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 14,
+  },
+  saveColorsBtnText: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  accordionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  optionsBody: {
+    marginTop: 10,
+  },
+  chipScroll: {
+    gap: 8,
+    paddingVertical: 2,
+  },
+  optionChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  optionChipText: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 11.5,
+    fontWeight: '700',
+  },
+  densityRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  densityBtn: {
+    flex: 1,
+    paddingVertical: 9,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  densityBtnText: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 11.5,
+    fontWeight: '700',
+  },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 5,
+  },
+  toggleLabel: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  optionInput: {
+    borderWidth: 1,
+    borderRadius: 12,
+    height: 44,
+    paddingHorizontal: 12,
+    fontFamily: FONT_FAMILY,
+    fontSize: 13,
+  },
+  optionsActionRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 14,
+  },
+  previewOutlineBtn: {
+    flex: 1,
+    height: 42,
+    borderRadius: 11,
+    borderWidth: 1.5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  previewOutlineBtnText: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  saveOptionsBtn: {
+    flex: 1.4,
+    height: 42,
+    borderRadius: 11,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  saveOptionsBtnText: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
   templatesSection: {
-    marginTop: 8,
+    marginTop: 4,
+  },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
   },
   sectionTitle: {
     fontFamily: FONT_FAMILY,
     fontSize: 16,
     fontWeight: '800',
-    marginBottom: 14,
+    marginBottom: 12,
+  },
+  sectionHint: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 11.5,
+    fontWeight: '600',
   },
   templateCard: {
     borderRadius: 20,
@@ -640,13 +1387,14 @@ const styles = StyleSheet.create({
   },
   templateTitleCol: {
     flex: 1,
-    marginRight: 10,
+    marginRight: 8,
   },
   nameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 3,
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 4,
   },
   templateName: {
     fontFamily: FONT_FAMILY,
@@ -654,7 +1402,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   badge: {
-    paddingHorizontal: 8,
+    paddingHorizontal: 7,
     paddingVertical: 2,
     borderRadius: 6,
   },
@@ -663,10 +1411,20 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
   },
+  layoutPill: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  layoutPillText: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 9.5,
+    fontWeight: '700',
+  },
   templateTagline: {
     fontFamily: FONT_FAMILY,
-    fontSize: 11,
-    lineHeight: 15,
+    fontSize: 11.5,
+    lineHeight: 16,
   },
   activeTag: {
     flexDirection: 'row',
@@ -684,117 +1442,23 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#059669',
   },
-  mockInvoiceBox: {
+  cardActionRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  previewCardBtn: {
+    flex: 1,
+    height: 42,
     borderRadius: 12,
     borderWidth: 1,
-    overflow: 'hidden',
-    backgroundColor: '#FFFFFF',
-    marginBottom: 14,
-  },
-  mockHeader: {
-    paddingHorizontal: 10,
-    paddingVertical: 8,
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  mockHeaderLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  mockLogoSquare: {
-    width: 16,
-    height: 16,
-    borderRadius: 4,
-    backgroundColor: 'rgba(255,255,255,0.25)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  mockLogoText: {
-    color: '#FFFFFF',
-    fontSize: 9,
-    fontWeight: '900',
-  },
-  mockStoreName: {
+  previewCardBtnText: {
     fontFamily: FONT_FAMILY,
-    fontSize: 10,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
-  mockInvNo: {
-    fontFamily: FONT_FAMILY,
-    fontSize: 9,
-    color: '#FFFFFF',
+    fontSize: 13,
     fontWeight: '700',
-  },
-  mockMetaRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    backgroundColor: '#F8FAFC',
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
-  },
-  mockCustomer: {
-    fontFamily: FONT_FAMILY,
-    fontSize: 9,
-    fontWeight: '700',
-    color: '#1E293B',
-  },
-  mockDate: {
-    fontFamily: FONT_FAMILY,
-    fontSize: 8,
-    color: '#64748B',
-  },
-  mockTableHead: {
-    flexDirection: 'row',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  mockCol: {
-    fontFamily: FONT_FAMILY,
-    fontSize: 8,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  mockTableRow: {
-    flexDirection: 'row',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
-  },
-  mockRowText: {
-    fontFamily: FONT_FAMILY,
-    fontSize: 9,
-    color: '#334155',
-  },
-  mockTotalRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    backgroundColor: '#FFFFFF',
-  },
-  mockTotalLabel: {
-    fontFamily: FONT_FAMILY,
-    fontSize: 9,
-    fontWeight: '800',
-    color: '#64748B',
-  },
-  mockTotalBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  mockTotalVal: {
-    fontFamily: FONT_FAMILY,
-    fontSize: 10,
-    fontWeight: '900',
-    color: '#FFFFFF',
   },
   activateBtn: {
     height: 42,
@@ -808,19 +1472,101 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
   },
+  // Preview Modal
+  previewSwitcherBar: {
+    borderBottomWidth: 1,
+    paddingVertical: 10,
+  },
+  previewTabScroll: {
+    paddingHorizontal: 14,
+    gap: 8,
+  },
+  previewTabPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  previewTabText: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 11.5,
+    fontWeight: '700',
+  },
+  previewColorStrip: {
+    paddingHorizontal: 14,
+    paddingTop: 8,
+    gap: 8,
+  },
+  previewPairChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 5,
+  },
+  miniSwatch: {
+    width: 11,
+    height: 11,
+    borderRadius: 5.5,
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
+  },
+  previewPairText: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 10.5,
+    fontWeight: '700',
+  },
+  previewScrollContent: {
+    padding: 16,
+    paddingBottom: 32,
+  },
+  previewBottomBar: {
+    flexDirection: 'row',
+    gap: 10,
+    padding: 14,
+    borderTopWidth: 1,
+  },
+  previewCloseBtn: {
+    flex: 0.8,
+    height: 46,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  previewCloseBtnText: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 13.5,
+    fontWeight: '700',
+  },
+  previewActivateBtn: {
+    flex: 1.6,
+    height: 46,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  previewActivateBtnText: {
+    fontFamily: FONT_FAMILY,
+    fontSize: 13.5,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
   // Digital Signature Styles
   cardHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 10,
   },
   iconBoxMini: {
-    width: 30,
-    height: 30,
-    borderRadius: 8,
+    width: 32,
+    height: 32,
+    borderRadius: 9,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 8,
+    marginRight: 10,
   },
   sigPreviewBox: {
     borderWidth: 1,
@@ -886,7 +1632,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
   },
-  // Modal Styles
+  // Signature Modal Styles
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',

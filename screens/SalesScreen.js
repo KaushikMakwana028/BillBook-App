@@ -13,11 +13,10 @@ import {
   TouchableOpacity,
   TextInput,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAlert } from '../contexts/AlertContext';
 import salesService from '../services/salesService';
-import { Header, BottomBar, SkeletonLoader, Icon, Pagination } from '../components';
+import { Header, BottomBar, SkeletonLoader, Icon, Pagination, SafeAreaView } from '../components';
 import { FONT_FAMILY } from '../components/fonts';
 
 const STATUS_FILTERS = [

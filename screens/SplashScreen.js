@@ -13,7 +13,7 @@ import {
   ActivityIndicator,
   Dimensions,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView } from '../components';
 import { useTheme } from '../contexts/ThemeContext';
 import { FONT_FAMILY } from '../components/fonts';
 
